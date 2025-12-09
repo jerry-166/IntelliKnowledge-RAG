@@ -1,0 +1,6 @@
+langchain
+langchain-openai
+langchain-ollama
+langgraph
+langchain_community
+pymupdf
