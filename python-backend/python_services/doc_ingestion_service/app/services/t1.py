@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma  # 或 FAISS, Milvus等
+from langchain_community.vectorstores import Chroma  # 或FAISS, Milvus等
 from langchain_core.documents import Document
 from transformers import CLIPModel, CLIPProcessor
 
