@@ -60,6 +60,16 @@ qwen_vision = ChatOpenAI(
     max_retries=3,
 )
 
+# qwen_vision_vllm = ChatOpenAI(
+#     model="Qwen3-VL-2B-Instruct",
+#     temperature=0.7,
+#     base_url="http://121.40.237.89:8000/v1",
+#     api_key='vllm',
+#     max_tokens=1024,
+#     timeout=60,
+#     max_retries=3,
+# )
+
 deepseek = ChatOpenAI(
     model="deepseek-v3",
     temperature=0.7,
@@ -135,3 +145,7 @@ class LLMFactory:
             num_predict=self.max_tokens,
         )
 
+
+if __name__ == '__main__':
+    invoke = qwen_vision_vllm.invoke("你好，你是谁？")
+    print(invoke)

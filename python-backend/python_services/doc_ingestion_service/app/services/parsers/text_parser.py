@@ -1,0 +1,18 @@
+"""
+对普通的文本文件、代码文件等单一格式文件解析
+"""
+from langchain_core.documents import Document
+from langchain_community.document_loaders import TextLoader
+
+from python_services.doc_ingestion_service.app.services.parsers.base_parser import BaseParser
+
+
+class TextParser(BaseParser):
+    def __init__(self):
+        super().__init__("Text解析器", "Text")
+
+    def parse(self, file_path: str) -> list[Document]:
+        """解析Text的主要函数"""
+        loader = TextLoader(file_path, encoding='utf-8')
+        loader_docs = loader.load()
+        return loader_docs

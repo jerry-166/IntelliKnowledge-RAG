@@ -4,7 +4,7 @@ parser的基类
 from abc import ABC, abstractmethod
 
 
-class base_parser(ABC):
+class BaseParser(ABC):
     def __init__(self, name, file_type):
         self.name = name
         self.file_type = file_type

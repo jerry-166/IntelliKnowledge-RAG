@@ -17,7 +17,7 @@ from PIL import Image
 from langchain_core.documents import Document
 
 from basic_core.llm_factory import qwen_vision
-from python_services.doc_ingestion_service.app.services.parsers.base_parser import base_parser
+from python_services.doc_ingestion_service.app.services.parsers.base_parser import BaseParser
 from python_services.doc_ingestion_service.app.services.utils.ocr_util import OcrUtil
 
 
@@ -40,7 +40,7 @@ class PDFElement:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-class PDFParser(base_parser):
+class PDFParser(BaseParser):
     """
     复杂PDF处理器 - 处理多种元素类型
 
@@ -129,7 +129,7 @@ class PDFParser(base_parser):
             if self.vision_llm:
                 # 既需要提取图片，也传入了视觉LLM，则使用视觉LLM进行描述
                 ocr_result = OcrUtil.vision_ocr(self.vision_llm, img_bytes)
-                ocr_method = "vision_llm"
+                ocr_method = self.vision_llm.model_name
             elif not self.vision_llm:
                 # 没有视觉LLM，判断是否有tesseract_ocr
                 if self.use_ocr:
@@ -142,7 +142,7 @@ class PDFParser(base_parser):
                 page_num=page_num,
                 bbox=(0, 0, page.rect.width, page.rect.height),
                 metadata={
-                    "source": "ocr",
+                    "source": "ocr_page",
                     "method": ocr_method
                 }
             )
@@ -221,7 +221,7 @@ class PDFParser(base_parser):
                             "height": pil_image.height,
                             "format": base_image.get("ext", "unknown"),
                             "image_index": img_index,
-                            # "base64": base64.b64encode(image_bytes).decode()
+                            "base64": base64.b64encode(image_bytes).decode()  # 用于在前端渲染图片
                         }
                     )
                 )
@@ -427,7 +427,7 @@ class PDFParser(base_parser):
                     "file_name": file_name,
                     "page_num": page_num + 1,
                     "total_pages": total_pages,
-                    "content_type": "text",
+                    "type": "text",
                     "parser": self.name,
                 }
             ))
@@ -441,26 +441,12 @@ class PDFParser(base_parser):
                             "file_path": file_path,
                             "file_name": file_name,
                             "page_num": page_num + 1,
-                            "content_type": "image",
+                            "type": "image",
                             "parser": self.name,
                             "bbox": image_part.bbox,
                             **image_part.metadata,
                         }
                     ))
-
-            # 如果整个PDF没有提取到内容，则返回一个空的Document
-            if not documents:
-                documents.append(Document(
-                    page_content="",
-                    metadata={
-                        "file_path": file_path,
-                        "file_name": file_name,
-                        "page_num": 1,
-                        "total_pages": total_pages,
-                        "content_type": "empty",
-                        "parser": self.name,
-                    }
-                ))
 
         return documents
 
