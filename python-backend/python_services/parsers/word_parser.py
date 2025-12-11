@@ -3,10 +3,9 @@ word的解析器
 """
 from langchain_core.documents import Document
 
-from python_services.doc_ingestion_service.app.services.parsers.base_parser import BaseParser
+from python_services.parsers.base_parser import BaseParser
 from langchain_community.document_loaders.word_document import (
-        Docx2txtLoader,
-        UnstructuredWordDocumentLoader,
+    UnstructuredWordDocumentLoader,
     )
 
 

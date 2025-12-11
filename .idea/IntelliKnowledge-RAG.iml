@@ -10,7 +10,6 @@
   <component name="PyNamespacePackagesService">
     <option name="namespacePackageFolders">
       <list>
-        <option value="$MODULE_DIR$/python-backend/python_services/doc_ingestion_service" />
         <option value="$MODULE_DIR$/python-backend/python_services" />
       </list>
     </option>

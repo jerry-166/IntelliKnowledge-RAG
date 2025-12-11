@@ -14,9 +14,9 @@ from langchain_community.document_loaders import UnstructuredMarkdownLoader
 from langchain_core.documents import Document
 
 from basic_core.llm_factory import qwen_vision
-from python_services.doc_ingestion_service.app.services.parsers.base_parser import BaseParser
-from python_services.doc_ingestion_service.app.services.utils.image_util import ImageUtil
-from python_services.doc_ingestion_service.app.services.utils.ocr_util import OcrUtil
+from python_services.parsers.base_parser import BaseParser
+from python_services.utils.image_util import ImageUtil
+from python_services.utils.ocr_util import OcrUtil
 
 
 class ElementType(Enum):
@@ -172,7 +172,7 @@ class MultimodalMarkdownParser(BaseParser):
             if self.image_mapping:
                 dict_ = self.image_mapping[uuid_str]
                 img_content = dict_.get('content')
-                img_path = dict_.get('metadata')['image_path']
+                img_path = dict_.get('metadata')['source']
                 return f"【图片内容】：\n{img_content}\n{img_path}"  # 明确标记图片语义
             return f"【图片解析失败】：UUID_{uuid_str}"
 
@@ -221,6 +221,6 @@ if __name__ == '__main__':
     print(f"✅ 图片Document列表（共{len(image_docs)}张）：")
     for i, img_doc in enumerate(image_docs):
         print(f"\n--- 图片{i + 1} ---")
-        print(f"图片路径：{img_doc.metadata['image_path']}")
+        print(f"图片路径：{img_doc.metadata['source']}")
         print(f"图片内容预览：{img_doc.page_content[:200]}...")
         print(f"图片元数据：{img_doc.metadata}")

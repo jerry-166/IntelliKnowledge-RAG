@@ -4,12 +4,11 @@ todo: 需要解析？还是直接通过多模态模型转向量？？？
 """
 
 from langchain_core.documents import Document
-from langchain_community.document_loaders import ImageCaptionLoader
 
 from basic_core.llm_factory import qwen_vision
-from python_services.doc_ingestion_service.app.services.parsers.base_parser import BaseParser
-from python_services.doc_ingestion_service.app.services.utils.ocr_util import OcrUtil
-from python_services.doc_ingestion_service.app.services.utils.image_util import ImageUtil
+from python_services.parsers.base_parser import BaseParser
+from python_services.utils.ocr_util import OcrUtil
+from python_services.utils.image_util import ImageUtil
 
 import os
 from pathlib import Path

@@ -3,7 +3,7 @@ ppt解析器---待完成
 """
 from langchain_core.documents import Document
 from langchain_community.document_loaders import UnstructuredPowerPointLoader
-from python_services.doc_ingestion_service.app.services.parsers.base_parser import BaseParser
+from python_services.parsers.base_parser import BaseParser
 
 
 class PPtParser(BaseParser):

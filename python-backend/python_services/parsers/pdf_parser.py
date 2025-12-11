@@ -17,8 +17,8 @@ from PIL import Image
 from langchain_core.documents import Document
 
 from basic_core.llm_factory import qwen_vision
-from python_services.doc_ingestion_service.app.services.parsers.base_parser import BaseParser
-from python_services.doc_ingestion_service.app.services.utils.ocr_util import OcrUtil
+from python_services.parsers.base_parser import BaseParser
+from python_services.utils.ocr_util import OcrUtil
 
 
 class ElementType(Enum):
@@ -423,12 +423,11 @@ class PDFParser(BaseParser):
             documents.append(Document(
                 page_content=page_content,
                 metadata={
-                    "file_path": file_path,
+                    "source": file_path,
                     "file_name": file_name,
                     "page_num": page_num + 1,
                     "total_pages": total_pages,
                     "type": "text",
-                    "parser": self.name,
                 }
             ))
 
@@ -438,11 +437,10 @@ class PDFParser(BaseParser):
                     documents.append(Document(
                         page_content=image_part.content,
                         metadata={
-                            "file_path": file_path,
+                            "source": file_path,
                             "file_name": file_name,
                             "page_num": page_num + 1,
                             "type": "image",
-                            "parser": self.name,
                             "bbox": image_part.bbox,
                             **image_part.metadata,
                         }
