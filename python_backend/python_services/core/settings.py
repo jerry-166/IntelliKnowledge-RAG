@@ -1,6 +1,5 @@
 """
 统一配置管理，支持多环境，热加载
-todo: reranker,cache...
 """
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -11,32 +10,36 @@ import yaml
 
 """
 1. field 的作用包括：
-设置默认值工厂: default_factory=ParseConfig 表示当创建 ParseConfig 类的新实例时，
-    如果没有显式提供 parser 参数，则会调用 ParseConfig() 来生成一个默认的 ParseConfig 实例作为其初始值。
-避免共享可变对象: 如果直接写成 parser: ParseConfig = ParseConfig()，那么所有的类
-    实例都会共享同一个 ParseConfig 对象，可能导致意外的行为。使用 default_factory 可以确保每个实例都获得一个新的 ParseConfig 实例。
-类型提示与实际赋值分离: 允许你为字段添加类型注解的同时，又能够灵活地控制其实例化过程。
+    设置默认值工厂: default_factory=ParseConfig 表示当创建 ParseConfig 类的新实例时，
+        如果没有显式提供 parser 参数，则会调用 ParseConfig() 来生成一个默认的 ParseConfig 实例作为其初始值。
+    避免共享可变对象: 如果直接写成 parser: ParseConfig = ParseConfig()，那么所有的类
+        实例都会共享同一个 ParseConfig 对象，可能导致意外的行为。使用 default_factory 可以确保每个实例都获得一个新的 ParseConfig 实例。
+    类型提示与实际赋值分离: 允许你为字段添加类型注解的同时，又能够灵活地控制其实例化过程。
 
 总之，这里的 field 主要是为了给 parser 字段提供一个动态生成的默认值，而不是静态的默认值
 
 2. @lru_cache() 装饰器的作用是实现函数结果缓存，具体说明如下：
-主要作用
-缓存函数返回值: 当 get_config() 函数被调用时，装饰器会缓存其返回的 RAGConfig 对象
-避免重复创建: 相同参数的多次调用将直接返回缓存的结果，而不会重新执行函数体
-在当前代码中的效果
-单例模式实现:
-第一次调用 get_config() 会创建一个新的 RAGConfig 实例并缓存
-后续调用（无论是否传入相同参数）都会返回同一个缓存的实例
-性能优化:
-避免重复的配置文件读取和对象创建开销
-特别是在频繁调用 get_config() 时提升明显
+    主要作用
+    缓存函数返回值: 当 get_config() 函数被调用时，装饰器会缓存其返回的 RAGConfig 对象
+    避免重复创建: 相同参数的多次调用将直接返回缓存的结果，而不会重新执行函数体
+    在当前代码中的效果
+    单例模式实现:
+    第一次调用 get_config() 会创建一个新的 RAGConfig 实例并缓存
+    后续调用（无论是否传入相同参数）都会返回同一个缓存的实例
+    性能优化:
+    避免重复的配置文件读取和对象创建开销
+    特别是在频繁调用 get_config() 时提升明显
 
-3. score_threshold: float = 0.3
-
-4. @classmethod
-    def from_yaml(cls, path: str) -> "RAGConfig":
+3. todo: score_threshold: float = 0.3  reranker的threshold是什么作用？
+    分数阈值配置，用于过滤相关性分数低于该阈值的搜索结果，只有分数高于 0.3 的结果才会被保留
+怎么用？
     
-5. # todo:filter_dict: dict = field(default_factory=dict)
+4. @classmethod
+def from_yaml(cls, path: str) -> "RAGConfig":  这里的cls是这个类的意思吗？可以调用类中的方法？
+    cls 确实是指向当前类的引用（在这个上下文中指 RAGConfig 类）
+    可以用来调用类中的其他类方法或创建类实例
+    实现工厂方法模式，提供不同的对象创建方式
+
 """
 
 
@@ -62,7 +65,6 @@ class VectorStoreConfig:
     # 检索配置
     default_top_k: int = 10
     score_threshold: float = 0.5
-    # todo:filter_dict: dict = field(default_factory=dict)
     # 连接配置
     host: Optional[str] = None
     port: Optional[str] = None
@@ -81,7 +83,7 @@ class RerankerConfig:
     device: str = "cpu"
     top_k: int = 5
     batch_size: int = 64
-    score_threshold: float = 0.3  # todo:?
+    score_threshold: float = 0.3
     max_length: int = 512
 
 

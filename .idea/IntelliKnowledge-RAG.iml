@@ -2,7 +2,7 @@
 <module type="PYTHON_MODULE" version="4">
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$">
-      <sourceFolder url="file://$MODULE_DIR$/python-backend" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/python_backend" isTestSource="false" />
     </content>
     <orderEntry type="jdk" jdkName="LangGraph-emailAgent" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
@@ -10,7 +10,7 @@
   <component name="PyNamespacePackagesService">
     <option name="namespacePackageFolders">
       <list>
-        <option value="$MODULE_DIR$/python-backend/python_services" />
+        <option value="$MODULE_DIR$/python_backend/python_services" />
       </list>
     </option>
   </component>

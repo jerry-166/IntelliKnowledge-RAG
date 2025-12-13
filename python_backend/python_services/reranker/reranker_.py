@@ -3,15 +3,19 @@
 """
 import logging
 from typing import Optional
-from basic_core.search_results import SearchResult
+from langchain_core.documents import Document
+from python_backend.python_services.core.search_results import SearchResult
 
 logger = logging.getLogger(__name__)
 
 """
 1. 之前检索时也会有score，是在document里面吗？
-
+    SearchResult(
+            document=Document(page_content="我喜欢吃pizza"),
+            score=0.7,
+        ),
 2.score = self.model.predict((query, result.document.page_content), show_progress_bar=False)[0]
-    结构：？
+    返回的是列表，[0]指第一个
     
 """
 
@@ -39,7 +43,7 @@ class Reranker:
         try:
             from sentence_transformers import CrossEncoder
             self.model = CrossEncoder(
-                model_name=self.model_name,
+                model_name_or_path=self.model_name,
                 trust_remote_code=True,
                 device=self.device,
                 max_length=self.max_length,
@@ -66,7 +70,7 @@ class Reranker:
                 (query, result.document.page_content) for result in results
             ]
             # 获得每个文档匹配问题的分数
-            relevant_scores = self.model.predict(query_doc_list, batch_size=self.batch_size, show_progress_bar=True)
+            relevant_scores = self.model.predict(query_doc_list, batch_size=self.batch_size, show_progress_bar=False)
             # 为结果文档添加分数
             for result, score in zip(results, relevant_scores):
                 result.score = score
@@ -94,3 +98,28 @@ class Reranker:
         except Exception as e:
             logger.error(f"❌️Cross-Encoder排序器计算分数失败，{e}")
             return 0.0
+
+
+if __name__ == '__main__':
+    reranker = Reranker()
+    query = "我喜欢吃什么？"
+    results = [
+        SearchResult(
+            document=Document(page_content="我喜欢吃pizza"),
+            score=0.7,
+        ),
+        SearchResult(
+            document=Document(page_content="我喜欢吃牛排"),
+            score=0.8,
+        ),
+        SearchResult(
+            document=Document(page_content="我喜欢小牛牛"),
+            score=0.8,
+        ),
+        SearchResult(
+            document=Document(page_content="我喜欢小猫"),
+            score=0.9,
+        ),
+    ]
+    rerank_results = reranker.rerank(query, results)
+    print(rerank_results)

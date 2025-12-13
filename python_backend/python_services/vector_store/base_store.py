@@ -4,7 +4,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 from langchain_core.documents import Document
-from basic_core.search_results import SearchResult
+from python_services.core.search_results import SearchResult
 
 """
 1. 为什么要**kwargs？

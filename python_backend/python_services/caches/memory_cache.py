@@ -11,10 +11,22 @@ from python_services.caches.base_cache import BaseCacheBackend
 1. self._cache.pop(key, None)
     移除时，如果成功则移除，如果失败，有None则返回None，没有则raise（这里是防止raise）
 
-2. next(iter(self._cache))
-
-3. 阻塞式的请求吗？（没有return false）难道是默认false？/ 只许成功？
-
+2. next(iter(self._cache)) 是什么用？next(),iter()?
+    self._cache 是一个 OrderedDict（有序字典）
+    iter(self._cache) 创建一个迭代器，指向字典的第一个元素
+    next() 函数获取迭代器的下一个元素（即第一个元素）
+常用场景：
+    避免创建不必要的中间列表
+        相比 list(collection)[0]，next(iter()) 更高效：
+        不需要创建完整的列表副本
+        只获取需要的第一个元素就停止迭代
+    这种模式在性能敏感的场景中特别有用，比如缓存系统的淘汰机制、队列操作等
+    
+3. with实现了阻塞式的请求吗？（没有return false）难道是默认false？/ 只许成功？
+    设计原则是尽力而为（best-effort）
+    对于 set 方法，除非发生严重异常，否则总是返回 True，表示操作已完成
+    对于 delete 方法，无论键是否存在都会正确处理，存在则删除并返回 True，不存在则返回 False
+    设计上倾向于简化调用者逻辑，不需要处理复杂的返回状态
 """
 
 

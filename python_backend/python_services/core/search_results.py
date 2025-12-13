@@ -12,7 +12,7 @@ class SearchResult:
     """搜索结果"""
     document: Document
     score: float
-    rank: int
+    rank: int = 1
 
     def to_dict(self) -> dict[str, Any]:
         return {
