@@ -30,6 +30,13 @@ import yaml
 性能优化:
 避免重复的配置文件读取和对象创建开销
 特别是在频繁调用 get_config() 时提升明显
+
+3. score_threshold: float = 0.3
+
+4. @classmethod
+    def from_yaml(cls, path: str) -> "RAGConfig":
+    
+5. # todo:filter_dict: dict = field(default_factory=dict)
 """
 
 
@@ -55,6 +62,7 @@ class VectorStoreConfig:
     # 检索配置
     default_top_k: int = 10
     score_threshold: float = 0.5
+    # todo:filter_dict: dict = field(default_factory=dict)
     # 连接配置
     host: Optional[str] = None
     port: Optional[str] = None
@@ -63,6 +71,33 @@ class VectorStoreConfig:
     max_retries: int = 3
     timeout: int = 60
     save_queries_num: int = 1000
+
+
+@dataclass
+class RerankerConfig:
+    """重排器配置"""
+    enabled: bool = True
+    model_name: str = "BAAI/bge-reranker-base"
+    device: str = "cpu"
+    top_k: int = 5
+    batch_size: int = 64
+    score_threshold: float = 0.3  # todo:?
+    max_length: int = 512
+
+
+@dataclass
+class CacheConfig:
+    """缓存配置"""
+    enabled: bool = True
+    backend: Literal["disk", "redis", "memory"] = "memory"
+    ttl: int = 3600
+    # 内存缓存
+    max_size: int = 1000
+    # redis缓存
+    redis_url: str = ""
+    redis_prefix: str = "rag:"
+    # 磁盘缓存
+    cache_dir: str = "./cache"
 
 
 @dataclass
@@ -99,8 +134,8 @@ class RAGConfig:
     splitter: SplitterConfig = field(default_factory=SplitterConfig)
     vector_store: VectorStoreConfig = field(default_factory=VectorStoreConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
-
-    # reranker\ cache
+    reranker: RerankerConfig = field(default_factory=RerankerConfig)
+    cache: CacheConfig = field(default_factory=CacheConfig)
 
     @classmethod
     def from_yaml(cls, path: str) -> "RAGConfig":
@@ -118,6 +153,8 @@ class RAGConfig:
             splitter=SplitterConfig(**data.get("splitter", {})),
             vector_store=VectorStoreConfig(**data.get("vector_store", {})),
             embedding=EmbeddingConfig(**data.get("embedding", {})),
+            reranker=RerankerConfig(**data.get("reranker", {})),
+            cache=CacheConfig(**data.get("cache", {})),
         )
 
 

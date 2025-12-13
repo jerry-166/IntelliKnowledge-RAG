@@ -2,10 +2,9 @@
 向量存储基类
 """
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Any, Optional
-
 from langchain_core.documents import Document
+from basic_core.search_results import SearchResult
 
 """
 1. 为什么要**kwargs？
@@ -16,22 +15,6 @@ from langchain_core.documents import Document
     ID 映射: Faiss 在检索时会返回与向量关联的 ID 列表
     向量标识: 每个存储的向量都有唯一的标识符（通常是整数 ID）
 """
-
-
-@dataclass
-class SearchResult:
-    """搜索结果"""
-    document: Document
-    score: float
-    rank: int
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "content": self.document.page_content,
-            "metadata": self.document.metadata,
-            "score": self.score,
-            "rank": self.rank
-        }
 
 
 class BaseVectorStore(ABC):

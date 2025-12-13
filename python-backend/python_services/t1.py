@@ -1,18 +1,6 @@
-# services/vector_store/multimodal_store.py
-"""
-企业级多模态向量存储
-- 支持多种后端(Chroma/Milvus/Qdrant)
-- 批量处理优化
-- 重试机制
-- 缓存层
-- 监控指标
-todo: 为什么没有用到clip模型？
-"""
 import hashlib
 import logging
-import threading
 import time
-from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Literal
 
 from langchain_core.documents import Document
@@ -41,24 +29,6 @@ class MultimodalVectorStore(BaseVectorStore):
          store.add_documents(documents)
          results = store.search("query", top_k=10, use_reranker=True)
     """
-
-    def _init_reranker(self):
-        """初始化重排序器"""
-        if self.config.reranker.enabled:
-            self.reranker = Reranker(
-                model_name=self.config.reranker.model,
-                top_k=self.config.reranker.top_k,
-            )
-        else:
-            self.reranker = None
-    
-    def _init_cache(self):
-        """初始化缓存"""
-        if self.config.cache.enabled:
-            self.cache = CacheManager(self.config.cache)
-        else:
-            self.cache = None
-    
     # ==================== 核心API ====================
     
     @timed
