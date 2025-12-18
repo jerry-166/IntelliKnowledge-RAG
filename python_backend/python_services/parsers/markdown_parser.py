@@ -14,18 +14,10 @@ from langchain_community.document_loaders import UnstructuredMarkdownLoader
 from langchain_core.documents import Document
 
 from basic_core.llm_factory import qwen_vision
+from python_services.core.parser_element_type import ElementType
 from python_services.parsers.base_parser import BaseParser
 from python_services.utils.image_util import ImageUtil
 from python_services.utils.ocr_util import OcrUtil
-
-
-class ElementType(Enum):
-    """元素类型枚举"""
-    TEXT = "text"
-    IMAGE = "image"
-    TABLE = "table"
-    LINK = "link"
-    HEADER = "header"  # Markdown格式保留处理？
 
 
 @dataclass
@@ -44,20 +36,26 @@ class MultimodalMarkdownParser(BaseParser):
         'header': r'^#+ (.+)',
     }
 
-    def __init__(self, vision_llm=None, use_ocr: bool = True, use_vision: bool = False):
-        super().__init__("Markdown解析器", "Markdown")
+    def __init__(
+            self,
+            vision_llm=None,
+            use_ocr: bool = True,
+            use_vision: bool = False,
+            max_workers: int = 4
+    ):
+        super().__init__("Markdown解析器", ["md"], max_workers)
         self.vision_llm = vision_llm
         self.use_ocr = use_ocr
         self.use_vision = use_vision
         # 存储图片uuid和图片内容的映射关系
         self.image_mapping: dict = {}
 
-    def parse(self, file_path: str) -> list[Document]:
+    def parse_impl(self, file_path_or_url: str) -> list[Document]:
         """解析Markdown的主要函数"""
         documents = []
 
         # 判断文件是否存在
-        file_path = Path(file_path)
+        file_path = Path(file_path_or_url)
         if not file_path.exists():
             raise FileNotFoundError(f"文件不存在: {file_path}")
 
@@ -117,7 +115,8 @@ class MultimodalMarkdownParser(BaseParser):
         try:
             content = ""
             process_type = ""
-            image_bytes = ImageUtil.load_image(img_path, base_dir)
+            image = ImageUtil.load_image(img_path, base_dir)
+            image_bytes = image.tobytes()
             if not image_bytes:
                 return None
 
@@ -143,7 +142,7 @@ class MultimodalMarkdownParser(BaseParser):
                 'alt_text': alt_text,
                 'raw': f"![{alt_text}]({img_path})",
                 'base_dir': str(base_dir),
-                'ocr_': {process_type},
+                'ocr_': process_type,
             }
         )
         return element

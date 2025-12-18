@@ -10,6 +10,16 @@ from zai import ZhipuAiClient
 from langchain_ollama import ChatOllama
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
+
+
+def init_embedding_basic(model_name, device='cpu', normalize=True):
+    return HuggingFaceEmbeddings(
+        model_name=model_name,
+        model_kwargs={'device': device},
+        encode_kwargs={'normalize_embeddings': normalize}
+    )
+
 
 zhipu_embedding = ZhipuAIEmbeddings(
     model="embedding-3",

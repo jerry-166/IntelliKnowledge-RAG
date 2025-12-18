@@ -2,6 +2,7 @@
 对上传的图片进行解析
 todo: 需要解析？还是直接通过多模态模型转向量？？？
 """
+from typing import Optional
 
 from langchain_core.documents import Document
 
@@ -16,16 +17,17 @@ from pathlib import Path
 
 class ImageParser(BaseParser):
     def __init__(self, vision_llm=None, use_vision: bool = False, use_ocr: bool = True):
-        super().__init__("图片解析器", "图片")
+        super().__init__("图片解析器", ["png", "jpg", "jpeg"])
         self.vision_llm = vision_llm
         self.use_vision = use_vision
         self.use_ocr = use_ocr
 
-    def parse(self, file_path: str) -> Document | None:
+    def parse_impl(self, file_path_or_url: str) -> Document | None:
         """解析图片的主要函数"""
         try:
             # 使用OCR工具处理图片
-            image_bytes = ImageUtil.load_image(file_path, Path(os.path.dirname(file_path)))
+            image = ImageUtil.load_image(file_path_or_url, Path(os.path.dirname(file_path_or_url)))
+            image_bytes = image.tobytes()
             if not image_bytes:
                 print(f"图片加载失败")
                 return None
@@ -35,7 +37,7 @@ class ImageParser(BaseParser):
                     vision_doc = Document(
                         page_content=vision_content,
                         metadata={
-                            "source": file_path,
+                            "source": file_path_or_url,
                             "type": "image",
                             "ocr_": self.vision_llm.model_name
                         }
@@ -50,7 +52,7 @@ class ImageParser(BaseParser):
                     ocr_doc = Document(
                         page_content=ocr_content,
                         metadata={
-                            "source": file_path,
+                            "source": file_path_or_url,
                             "type": "image",
                             "ocr_": "Tesseract OCR"
                         }

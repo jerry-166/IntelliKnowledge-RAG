@@ -46,9 +46,9 @@ def from_yaml(cls, path: str) -> "RAGConfig":  这里的cls是这个类的意思
 @dataclass
 class EmbeddingConfig:
     """嵌入模型配置"""
-    use_clip: bool = True
-    text_embedding_model: str = "BAAI/bge-base-zh-v1.5"
-    clip_embedding_model: str = "openai/clip-vit-base-patch32"
+    use_clip: bool = False
+    text_embedding_model: str = r"C:\Users\ASUS\.cache\huggingface\hub\models--BAAI--bge-base-zh-v1.5\snapshots\f03589ceff5aac7111bd60cfc7d497ca17ecac65"
+    clip_embedding_model: str = r"C:\Users\ASUS\.cache\huggingface\hub\models--openai--clip-vit-base-patch32\snapshots\3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268"
     device: str = 'cpu'
     trust_remote_code: bool = True
     normalize: bool = True
@@ -62,6 +62,11 @@ class VectorStoreConfig:
     collection_name: str = "multimodal_docs"
     persist_directory: str = "./vector_db"
     distance_metric: Literal["cosine", "ip", "l2"] = "cosine"
+    # faiss的索引方式
+    faiss_persist_directory: str = "./vector_db/faiss"
+    faiss_index_type: Literal["flat", "hnsw", "ivf"] = "Flat"
+    faiss_image_index_type: Literal["flat", "hnsw", "ivf"] = "Flat"
+    faiss_nlist: int = 100
     # 检索配置
     default_top_k: int = 10
     score_threshold: float = 0.5
@@ -69,7 +74,7 @@ class VectorStoreConfig:
     host: Optional[str] = None
     port: Optional[str] = None
     # 性能配置
-    batch_size: int = 64
+    batch_size: int = 32
     max_retries: int = 3
     timeout: int = 60
     save_queries_num: int = 1000
@@ -79,7 +84,7 @@ class VectorStoreConfig:
 class RerankerConfig:
     """重排器配置"""
     enabled: bool = True
-    model_name: str = "BAAI/bge-reranker-base"
+    model_name: str = r"C:\Users\ASUS\.cache\huggingface\hub\models--BAAI--bge-reranker-base\snapshots\2cfc18c9415c912f9d8155881c133215df768a70"
     device: str = "cpu"
     top_k: int = 5
     batch_size: int = 64
@@ -91,15 +96,19 @@ class RerankerConfig:
 class CacheConfig:
     """缓存配置"""
     enabled: bool = True
-    backend: Literal["disk", "redis", "memory"] = "memory"
+    backend: Literal["disk", "redis", "memory"] = "redis"
     ttl: int = 3600
+    semantic_threshold = 0.85
     # 内存缓存
     max_size: int = 1000
     # redis缓存
-    redis_url: str = ""
+    redis_url: str = r"redis://localhost:6377/0?socket_timeout=5&retry_on_timeout=true"
     redis_prefix: str = "rag:"
+    faiss_persist_directory: str = "./cache/faiss"
+    # embed
+    embedding = r"C:\Users\ASUS\.cache\huggingface\hub\models--BAAI--bge-base-zh-v1.5\snapshots\f03589ceff5aac7111bd60cfc7d497ca17ecac65"
     # 磁盘缓存
-    cache_dir: str = "./cache"
+    cache_dir: str = "./cache/disk"
 
 
 @dataclass
@@ -108,6 +117,8 @@ class ParseConfig:
     use_ocr: bool = True
     use_vision: bool = True
     ocr_engine: Literal["tesseract", "paddleocr", "easyocr"] = "tesseract"
+    extract_images: bool = True
+    extract_tables: bool = True
     min_image_size: int = 100
     max_image_size: int = 4096
     supported_formats: list = field(default_factory=lambda: [
@@ -119,6 +130,12 @@ class ParseConfig:
 
 @dataclass
 class SplitterConfig:
+    # semantic embed配置
+    semantic_embedding_model: str = r"C:\Users\ASUS\.cache\huggingface\hub\models--BAAI--bge-base-zh-v1.5\snapshots\f03589ceff5aac7111bd60cfc7d497ca17ecac65"
+    device: str = "cpu"
+    trust_remote_code: bool = True
+    normalize_embeddings: bool = True
+    # 文本切分配置
     chunk_size: int = 500
     chunk_overlap: int = 50
     strategy: Literal["recursive", "auto", "semantic", "markdown"] = "auto"

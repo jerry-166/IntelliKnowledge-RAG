@@ -48,7 +48,6 @@ class Reranker:
                 device=self.device,
                 max_length=self.max_length,
             )
-            logger.info(f"✅️Cross-Encoder排序器初始化完成，{self.model_name}")
         except ImportError:
             logger.error("❌️请安装 sentence_transformers 库")
             self.model = None

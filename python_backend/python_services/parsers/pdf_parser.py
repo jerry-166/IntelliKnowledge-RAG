@@ -17,17 +17,9 @@ from PIL import Image
 from langchain_core.documents import Document
 
 from basic_core.llm_factory import qwen_vision
+from python_services.core.parser_element_type import ElementType
 from python_services.parsers.base_parser import BaseParser
 from python_services.utils.ocr_util import OcrUtil
-
-
-class ElementType(Enum):
-    TEXT = "text"
-    IMAGE = "image"
-    TABLE = "table"
-    LINK = "link"
-    HEADER = "header"
-    FOOTER = "footer"
 
 
 @dataclass
@@ -58,24 +50,23 @@ class PDFParser(BaseParser):
             extract_tables: bool = True,
             min_image_size: int = 100,
     ):
-        super().__init__("pdf解析器", "pdf")
+        super().__init__("pdf解析器", ["pdf"])
         self.vision_llm = vision_llm
         self.use_ocr = use_ocr
         self.extract_images = extract_images
         self.extract_tables = extract_tables
         self.min_image_size = min_image_size
 
-    def parse(self, file_path: str, is_scanned: bool = False) -> List[Document]:
+    def parse_impl(self, file_path_or_url: str, is_scanned: bool = False) -> List[Document]:
         """
         解析pdf文件，返回langchain的Document列表
         """
-        pdf_path = Path(file_path)
+        pdf_path = Path(file_path_or_url)
         if not pdf_path.exists():
             raise FileNotFoundError(f"文件不存在：{pdf_path}")
 
         docs = fitz.open(pdf_path)  # Document()
         total_pages = len(docs)
-        print(f"共{total_pages}页")
 
         # 结构列表
         page_elements_map: Dict[int, List[PDFElement]] = {}

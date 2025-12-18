@@ -14,11 +14,11 @@ class WordParser(BaseParser):
     word的解析器
     """
     def __init__(self):
-        super().__init__("Word解析器", "Word")
+        super().__init__("Word解析器", ["doc", "docx"])
 
-    def parse(self, file_path: str) -> list[Document]:
+    def parse_impl(self, file_path_or_url: str) -> list[Document]:
         """解析Word的主要函数"""
-        loader = UnstructuredWordDocumentLoader(file_path)
+        loader = UnstructuredWordDocumentLoader(file_path_or_url)
         docs = loader.load()
         print(f"目前解析word文件的主要方式是：UnstructuredWordDocumentLoader")
         return docs

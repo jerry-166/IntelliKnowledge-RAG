@@ -28,7 +28,7 @@ RAGConfig = get_config()
 class IntegrationSplitter:
     def __init__(
             self,
-            embeddings,
+            semantic_embedding,
             chunk_size: int = RAGConfig.splitter.chunk_size,
             chunk_overlap: int = RAGConfig.splitter.chunk_overlap,
     ):
@@ -39,7 +39,7 @@ class IntegrationSplitter:
         )
 
         self.semantic_splitter = SemanticChunker(
-            embeddings=embeddings,
+            embeddings=semantic_embedding,
             breakpoint_threshold_type=RAGConfig.splitter.breakpoint_threshold_type,
             min_chunk_size=RAGConfig.splitter.min_chunk_size,
             breakpoint_threshold_amount=RAGConfig.splitter.breakpoint_threshold_amount,
@@ -50,7 +50,7 @@ class IntegrationSplitter:
             chunk_overlap=chunk_overlap,
         )
 
-    def split_documents_(self, documents: List[Document], file_type: str = 'txt', ) -> List[Document]:
+    def split_documents_(self, documents: List[Document], file_suffix: str = 'txt', ) -> List[Document]:
         """切分Document"""
         docs = []
         text_docs = []
@@ -63,16 +63,16 @@ class IntegrationSplitter:
                 image_docs.append(document)
 
         # todo: 根据type类型选择不同的切分器，切分文本的Document
-        if file_type == 'md':
+        if file_suffix == 'md':
             splitter_md_documents = self.markdown_splitter.split_documents(text_docs)
             docs.extend(splitter_md_documents)
-        elif file_type == 'txt':
+        elif file_suffix == 'txt':
             splitter_text_documents = self.text_splitter.split_documents(text_docs)
             docs.extend(splitter_text_documents)
-        elif file_type == 'pdf':
+        elif file_suffix == 'pdf':
             splitter_text_documents = self.text_splitter.split_documents(text_docs)
             docs.extend(splitter_text_documents)
-        elif file_type in ['docx', 'pptx']:
+        elif file_suffix in ['docx', 'pptx']:
             splitter_text_documents = self.semantic_splitter.split_documents(text_docs)
             docs.extend(splitter_text_documents)
 
@@ -101,7 +101,7 @@ if __name__ == '__main__':
         'trust_remote_code': True
     }
     splitter = IntegrationSplitter(
-        embeddings=HuggingFaceEmbeddings(
+        semantic_embedding=HuggingFaceEmbeddings(
             model_name="BAAI/bge-base-zh-v1.5",
             model_kwargs=model_kwargs,
             encode_kwargs={'normalize_embeddings': True}

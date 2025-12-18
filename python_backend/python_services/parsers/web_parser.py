@@ -12,10 +12,10 @@ class WebParser(BaseParser):
         self.use_ocr = use_ocr
         self.use_vision = use_vision
 
-    def parse(self, url: str) -> list[Document]:
+    def parse_impl(self, file_path_or_url: str) -> list[Document]:
         """解析Web页面的主要函数"""
-        url_loader = UnstructuredURLLoader(urls=[url])
-        web_loader = WebBaseLoader(url)
+        url_loader = UnstructuredURLLoader(urls=[file_path_or_url])
+        web_loader = WebBaseLoader(file_path_or_url)
         doc1 = url_loader.load()
         doc2 = web_loader.load()
         print(f"目前对Web页面解析的方式：UnstructuredURLLoader，请等待后续更新~~~")
