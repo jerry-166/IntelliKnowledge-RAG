@@ -206,6 +206,8 @@ class RAGPipeline:
 def call(query: str):
     results = pipeline.search(
         query=query,
+        filter_dict={"ext": "pdf"},
+        search_type="hybrid",
         top_k=5,
         use_reranker=True,
     )
@@ -222,13 +224,15 @@ if __name__ == '__main__':
     pipeline = RAGPipeline(config=get_config(), vision_llm=qwen_vision)
 
     # 摄入文档
-    file_name = r"C:\Users\ASUS\Desktop\video.pdf"
-    file_dir = r"C:\Users\ASUS\Desktop\pythonCode\LangChain\second_start\src\agent\static\pdf"
+    # file_name = r"C:\Users\ASUS\Desktop\video.pdf"
     # pipeline.ingest(file_name, show_progress=True)
+    # file_dir = r"C:\Users\ASUS\Desktop\pythonCode\LangChain\second_start\src\agent\static\pdf"
     # pipeline.ingest_directory(file_dir, show_progress=True)
+    # file_name = r"C:\Users\ASUS\Desktop\makedown\deepAgent.md"
+    # pipeline.ingest(file_name, show_progress=True)
 
     # 检索
-    call("提示词工程是什么？")
-    call("什么事提示词工程？")
-    call("西北工业大学最高是多少？")
-    call("西北工业大学最高分是多少？")
+    call("是一个由几何形状构成的抽象图形标志，不包含任何文字、数据或传统意义上的图表。其内容描述如下：- **整体结构**：图像由几个相互交叠的红色和灰色几何形状组成，整体呈现动态和现代感。")
+    # call("什么事提示词工程？")
+    # call("西北工业大学最高是多少？")
+    # call("西北工业大学最高分是多少？")

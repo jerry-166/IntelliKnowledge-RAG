@@ -47,16 +47,6 @@ class BaseVectorStore(ABC):
         pass
 
     @abstractmethod
-    def persist(self, persist_directory: str):
-        """持久化到对应的目录中"""
-        pass
-
-    @abstractmethod
-    def load(self, persist_directory: str):
-        """加载向量库"""
-        pass
-
-    @abstractmethod
     def get_stats(self) -> dict[str, Any]:
         """获取统计结果"""
         pass

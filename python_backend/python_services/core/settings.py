@@ -42,13 +42,18 @@ def from_yaml(cls, path: str) -> "RAGConfig":  这里的cls是这个类的意思
 
 """
 
+clip_path = {
+    "clip_cn": r"C:\Users\ASUS\.cache\huggingface\hub\models--OFA-Sys--chinese-clip-vit-large-patch14\chinese-clip-vit-large-patch14",
+    "clip_openai": r"C:\Users\ASUS\.cache\huggingface\hub\models--openai--clip-vit-base-patch32\snapshots\3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268",
+}
+
 
 @dataclass
 class EmbeddingConfig:
     """嵌入模型配置"""
-    use_clip: bool = False
+    use_clip: bool = True
     text_embedding_model: str = r"C:\Users\ASUS\.cache\huggingface\hub\models--BAAI--bge-base-zh-v1.5\snapshots\f03589ceff5aac7111bd60cfc7d497ca17ecac65"
-    clip_embedding_model: str = r"C:\Users\ASUS\.cache\huggingface\hub\models--openai--clip-vit-base-patch32\snapshots\3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268"
+    clip_embedding_model: str = clip_path.get("clip_cn")
     device: str = 'cpu'
     trust_remote_code: bool = True
     normalize: bool = True
@@ -96,7 +101,7 @@ class RerankerConfig:
 class CacheConfig:
     """缓存配置"""
     enabled: bool = True
-    backend: Literal["disk", "redis", "memory"] = "redis"
+    backend: Literal["disk", "redis", "memory"] = "memory"
     ttl: int = 3600
     semantic_threshold = 0.85
     # 内存缓存
@@ -119,7 +124,7 @@ class ParseConfig:
     ocr_engine: Literal["tesseract", "paddleocr", "easyocr"] = "tesseract"
     extract_images: bool = True
     extract_tables: bool = True
-    min_image_size: int = 100
+    min_image_size: int = 10
     max_image_size: int = 4096
     supported_formats: list = field(default_factory=lambda: [
         "pdf", "docx", "pptx", "md", "txt", "html", "png", "jpg", "jpeg"

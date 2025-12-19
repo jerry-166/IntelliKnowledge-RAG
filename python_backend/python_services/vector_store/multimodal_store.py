@@ -71,8 +71,6 @@ logger = logging.getLogger(__name__)  # 日志
 """
 
 
-# todo: metadata的排序问题
-
 # 定义重试的装饰器
 def retry_on_failure(max_retries=3, delay: float = 1.0):
     """重试的装饰器"""
@@ -194,7 +192,7 @@ class MultimodalVectorStore(BaseVectorStore):
         # 查缓存
         cache_key = None
         if use_cache and self.cache:
-            cache_key = query  # self._build_cache_key(query, top_k, filter_dict, search_type)
+            cache_key = query
             cached = self.cache.get(cache_key)
             if cached:
                 logger.info(f"✅️缓存命中，问题：{query[:50]}")
@@ -221,19 +219,6 @@ class MultimodalVectorStore(BaseVectorStore):
 
         return results
 
-    # def _build_cache_key(
-    #         self,
-    #         query: str,
-    #         top_k: int,
-    #         filter_dict: Optional[dict[str, Any]] = None,
-    #         search_type: str = "text",
-    # ) -> str:
-    #     """todo: 构建缓存key"""
-    #     key_parts = [query, str(top_k), search_type]
-    #     if filter_dict:
-    #         key_parts.append(str(sorted(filter_dict.items())))
-    #     return hashlib.md5("|".join(key_parts).encode()).hexdigest()
-
     def _execute_search_store(
             self,
             query: str,
@@ -243,16 +228,16 @@ class MultimodalVectorStore(BaseVectorStore):
     ) -> list[SearchResult]:
         """从store中查询"""
         all_results = []
-        if search_type in ["text", "hybrid"]:
+        if search_type in ["text", "hybrid"] and self.text_store:
             text_results = self._search_store(self.text_store, query, top_k, filter_dict)
             all_results.extend(text_results)
 
-        if search_type in ["image", "hybrid"]:
+        if search_type in ["image", "hybrid"] and hasattr(self, "image_store"):
             image_results = self._search_store(self.image_store, query, top_k, filter_dict)
             all_results.extend(image_results)
 
         # 对hybrid的结果进行排序（其他两种模式返回结果本就是有序的）
-        if search_type == "hybrid":
+        if search_type == "hybrid" and hasattr(self, "image_store") and self.image_store:
             all_results.sort(key=lambda x: x.score, reverse=True)
             # 取前top_k
             all_results = all_results[:top_k]
@@ -286,7 +271,7 @@ class MultimodalVectorStore(BaseVectorStore):
                 ) for document, score in docs_with_scores
             ]
         except Exception as e:
-            logger.error(f"❌️MultimodalVectorStore查询失败，{e}")
+            logger.error(f"❌️MultimodalVectorStore查询'{store}'失败，{e}")
             return []
 
     @time_counter  # 索引构建时间
@@ -325,11 +310,14 @@ class MultimodalVectorStore(BaseVectorStore):
         # 分类
         text_docs = []
         image_docs = []
-        for doc in deduplicated_documents:
-            if doc.metadata.get("type", "text") == "image":
-                image_docs.append(doc)
-            else:
-                text_docs.append(doc)
+        if self._has_clip:  # 如果使用clip，额外搞一个向量空间
+            for doc in deduplicated_documents:
+                if doc.metadata.get("type", "text") == "image":
+                    image_docs.append(doc)
+                else:
+                    text_docs.append(doc)
+        else:  # 不使用，默认图片和文本在一个向量空间？
+            text_docs = documents
 
         # 批量加入store中
         if text_docs:
@@ -503,12 +491,6 @@ class MultimodalVectorStore(BaseVectorStore):
             search_kwargs["filter"] = kwargs["filter"]
         return self.text_store.as_retriever(search_kwargs=search_kwargs)
 
-    def persist(self, persist_directory: str):
-        pass
-
-    def load(self, persist_directory: str):
-        pass
-
     def _init_embeddings(self):
         """初始化嵌入模型"""
         embedding_config = self.rag_config.embedding
@@ -524,11 +506,7 @@ class MultimodalVectorStore(BaseVectorStore):
         # 图片嵌入
         if embedding_config.use_clip and embedding_config.clip_embedding_model:
             try:
-                from transformers import CLIPModel, CLIPProcessor
-                self.clip_model = CLIPModel.from_pretrained(embedding_config.clip_embedding_model)
-                self.clip_processor = CLIPProcessor.from_pretrained(use_fast=True,
-                                                                    pretrained_model_name_or_path=embedding_config.clip_embedding_model)
-                self.image_embedding = CLIPEmbeddings(batch_size=embedding_config.batch_size)
+                self.image_embedding = CLIPEmbeddings(model_name=embedding_config.clip_embedding_model, batch_size=embedding_config.batch_size)
                 self._has_clip = True
                 logger.info(f"✅️clip_embedding 初始化成功 模型：{embedding_config.clip_embedding_model}")
             except Exception as e:
@@ -567,7 +545,7 @@ class MultimodalVectorStore(BaseVectorStore):
                 store_config.faiss_index_type,
                 store_config.faiss_nlist
             )
-
+            # 如果不使用clip不需要分库存储
             self.text_store = FAISS(
                 embedding_function=self.text_embedding,
                 index=index,
@@ -575,14 +553,7 @@ class MultimodalVectorStore(BaseVectorStore):
                 index_to_docstore_id={},
                 distance_strategy=store_config.distance_metric,
             )
-
-            self.image_store = FAISS(
-                embedding_function=self.text_embedding,
-                index=index,
-                docstore=InMemoryDocstore(),
-                index_to_docstore_id={},
-                distance_strategy=store_config.distance_metric,
-            )
+            logger.info("✅FAISS-text_store 初始化成功")
 
             if self._has_clip:
                 index = IndexUtil.get_faiss_index(
@@ -598,6 +569,7 @@ class MultimodalVectorStore(BaseVectorStore):
                     index_to_docstore_id={},
                     distance_strategy=store_config.distance_metric,
                 )
+                logger.info("✅FAISS-image_store 初始化成功")
         except ImportError:
             raise ImportError("请安装faiss-cpu来使用Faiss向量数据库")
 
@@ -611,11 +583,6 @@ class MultimodalVectorStore(BaseVectorStore):
                 persist_directory=str(persist_directory / "text"),
             )
             logger.info(f"✅Chroma-text_store 初始化成功")
-            self.image_store = Chroma(
-                collection_name=store_config.collection_name + "_image",
-                embedding_function=self.text_embedding,
-                persist_directory=str(persist_directory / "image"),
-            )
             if self._has_clip:
                 self.image_store = Chroma(
                     collection_name=store_config.collection_name + "_image",
@@ -643,11 +610,7 @@ class MultimodalVectorStore(BaseVectorStore):
                 connection_args=connection_args,
             )
             logger.info("✅️Milvus-text_store 初始化成功")
-            self.image_store = Milvus(
-                embedding_function=self.text_embedding,
-                collection_name=store_config.collection_name + "_image",
-                connection_args=connection_args,
-            )
+
             if self._has_clip:
                 self.image_store = Milvus(
                     embedding_function=self.image_embedding,
@@ -675,12 +638,7 @@ class MultimodalVectorStore(BaseVectorStore):
                 distance_strategy=store_config.distance_metric,
             )
             logger.info(f"✅️Qdrant-text_store 初始化成功")
-            self.image_store = Qdrant(
-                client=qdrant_client,
-                collection_name=store_config.collection_name + "_image",
-                embeddings=self.text_embedding,
-                distance_strategy=store_config.distance_metric,
-            )
+
             if self._has_clip:
                 self.image_store = Qdrant(
                     client=qdrant_client,

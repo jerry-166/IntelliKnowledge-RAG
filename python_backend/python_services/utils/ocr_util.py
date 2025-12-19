@@ -4,7 +4,7 @@ ocr的工具类
 
 import base64
 import io
-
+from typing import Optional
 from PIL import Image
 
 # 静态方法与普通方法对比
@@ -24,13 +24,29 @@ from PIL import Image
 
 class OcrUtil:
     @staticmethod
-    def vision_ocr(vision_llm, image_bytes: bytes) -> str:
-        """使用视觉LLM进行OCR识别和理解"""
+    def vision_ocr(vision_llm, image: Image.Image) -> str:
+        """
+        使用视觉LLM进行OCR识别
+
+        :param vision_llm: 视觉LLM实例
+        :param image: PIL.Image对象（不是bytes！）
+        :return: 识别的文本
+        """
         if not vision_llm:
             return ""
 
         try:
-            base64_image = base64.b64encode(image_bytes).decode()
+            # 🔥 关键修复：正确转换为PNG/JPEG字节流
+            from python_services.utils.image_util import ImageUtil
+
+            # 优先使用JPEG（阿里云兼容性更好，体积更小）
+            # 如果图片有透明通道，使用PNG
+            if image.mode in ('RGBA', 'LA', 'P'):
+                img_bytes, img_format = ImageUtil.image_to_bytes(image, format="PNG")
+            else:
+                img_bytes, img_format = ImageUtil.image_to_bytes(image, format="JPEG", quality=90)
+
+            base64_image = base64.b64encode(img_bytes).decode('utf-8')
 
             messages = [
                 {
@@ -38,12 +54,12 @@ class OcrUtil:
                     "content": [
                         {
                             "type": "text",
-                            "text": "根据情况提取文档中的所有文字内容或者分析图片内容。当提取这个文档页面中的所有文字内容时，保持原有的结构和格式（如果有表格，以Markdown表格格式输出）；当分析图片内容时，返回一个对于图片内容的段落描述。"
+                            "text": "请提取图片中的所有文字内容，保持原有结构和格式。如果有表格，以Markdown表格格式输出。如果是图形/图表，请描述其内容。"
                         },
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/png;base64, {base64_image}"
+                                "url": f"data:image/{img_format};base64,{base64_image}"
                             }
                         }
                     ]
@@ -52,19 +68,28 @@ class OcrUtil:
 
             response = vision_llm.invoke(messages)
             return response.content
+
         except Exception as e:
             print(f"视觉LLM OCR识别失败：{e}")
             return ""
 
     @staticmethod
-    def tesseract_ocr(img_bytes: bytes) -> str:
-        """使用pytesseract进行OCR"""
+    def tesseract_ocr(image: Image.Image) -> str:
+        """
+        使用pytesseract进行OCR
+
+        :param image: PIL.Image对象（不是bytes！）
+        """
         try:
             import pytesseract
             pytesseract.pytesseract.tesseract_cmd = r'D:\ASUS\develop\tesseract\Tesseract-OCR\tesseract.exe'
-            pil_image = Image.open(io.BytesIO(img_bytes))
+
+            # 转换为RGB模式（tesseract兼容性更好）
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+
             return pytesseract.image_to_string(
-                pil_image,
+                image,  # 直接传PIL.Image，不需要转bytes
                 lang="chi_sim+eng",
                 config=r'--tessdata-dir D:/ASUS/develop/tesseract/Tesseract-OCR/tessdata'
             )

@@ -27,13 +27,9 @@ class ImageParser(BaseParser):
         try:
             # 使用OCR工具处理图片
             image = ImageUtil.load_image(file_path_or_url, Path(os.path.dirname(file_path_or_url)))
-            image_bytes = image.tobytes()
-            if not image_bytes:
-                print(f"图片加载失败")
-                return None
             if self.use_ocr and self.use_vision:
                 try:
-                    vision_content = OcrUtil.vision_ocr(vision_llm=self.vision_llm, image_bytes=image_bytes)
+                    vision_content = OcrUtil.vision_ocr(vision_llm=self.vision_llm, image=image)
                     vision_doc = Document(
                         page_content=vision_content,
                         metadata={
@@ -48,7 +44,7 @@ class ImageParser(BaseParser):
                     print(f"视觉模型: {self.vision_llm.model_name} 解析失败: {e}")
             elif self.use_ocr:
                 try:
-                    ocr_content = OcrUtil.tesseract_ocr(image_bytes)
+                    ocr_content = OcrUtil.tesseract_ocr(image)
                     ocr_doc = Document(
                         page_content=ocr_content,
                         metadata={

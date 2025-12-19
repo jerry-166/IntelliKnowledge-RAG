@@ -6,7 +6,9 @@ todo: metadata的处理（page等...）
 todo: 检查循环逻辑正确与否，是否有重复处理page中的图片操作
 """
 import base64
+import datetime
 import io
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -14,6 +16,7 @@ from typing import Dict, Any, List
 
 import fitz
 from PIL import Image
+from zoneinfo import ZoneInfo
 from langchain_core.documents import Document
 
 from basic_core.llm_factory import qwen_vision
@@ -48,7 +51,7 @@ class PDFParser(BaseParser):
             use_ocr: bool = True,
             extract_images: bool = True,
             extract_tables: bool = True,
-            min_image_size: int = 100,
+            min_image_size: int = 10,
     ):
         super().__init__("pdf解析器", ["pdf"])
         self.vision_llm = vision_llm
@@ -78,26 +81,36 @@ class PDFParser(BaseParser):
             if is_scanned:
                 # 扫描件：直接使用视觉LLM描述就行（大多扫描件是文和图一起）
                 scanned_page_elements = self._scanned_page_ocr(page, page_num)
-                page_elements.append(scanned_page_elements)
+                if scanned_page_elements:
+                    print(f"处理扫描件成功")
+                    page_elements.append(scanned_page_elements)
             else:
                 # 普通页面：结构化提取
                 # 1. 提取文本块
                 text_elements = self._extract_texts(page, page_num)
-                page_elements.extend(text_elements)
+                if text_elements:
+                    print(f"提取PDF文本成功")
+                    page_elements.extend(text_elements)
 
                 # 2. 提取图片
                 if self.extract_images:
                     image_elements = self._extract_images(page, page_num, docs)
-                    page_elements.extend(image_elements)
+                    if image_elements:
+                        print(f"提取PDF图片成功")
+                        page_elements.extend(image_elements)
 
                 # 3. 提取表格
                 if self.extract_tables:
                     table_elements = self._extract_tables(page, page_num)
-                    page_elements.extend(table_elements)
+                    if table_elements:
+                        print(f"提取PDF表格成功")
+                        page_elements.extend(table_elements)
 
                 # 4. 提取链接
                 link_elements = self._extract_links(page, page_num)
-                page_elements.extend(link_elements)
+                if link_elements:
+                    print(f"提取PDF链接成功")
+                    page_elements.extend(link_elements)
 
             page_elements_map[page_num] = page_elements
 
@@ -119,7 +132,7 @@ class PDFParser(BaseParser):
             img_bytes = pix.tobytes("png")
             if self.vision_llm:
                 # 既需要提取图片，也传入了视觉LLM，则使用视觉LLM进行描述
-                ocr_result = OcrUtil.vision_ocr(self.vision_llm, img_bytes)
+                ocr_result = OcrUtil.vision_ocr(self.vision_llm, img_bytes, 'png')
                 ocr_method = self.vision_llm.model_name
             elif not self.vision_llm:
                 # 没有视觉LLM，判断是否有tesseract_ocr
@@ -134,7 +147,7 @@ class PDFParser(BaseParser):
                 bbox=(0, 0, page.rect.width, page.rect.height),
                 metadata={
                     "source": "ocr_page",
-                    "method": ocr_method
+                    "method": ocr_method,
                 }
             )
 
@@ -163,8 +176,8 @@ class PDFParser(BaseParser):
                             bbox=tuple(block["bbox"]),
                             # todo 对于metadata
                             metadata={
-                                "font_size": self._get_dominant_font_size(block),
-                                "is_header": is_header
+                                # "font_size": self._get_dominant_font_size(block),
+                                "is_header": is_header,
                             }
                         )
                     )
@@ -184,9 +197,8 @@ class PDFParser(BaseParser):
                 base_image = doc.extract_image(xref)
                 image_bytes = base_image["image"]
 
-                # todo:检查图片大小
-                pil_image = Image.open(io.BytesIO(image_bytes))
-                if pil_image.width < self.min_image_size or pil_image.height < self.min_image_size:
+                # 检查图片大小(去除一些小型图表元素)
+                if base_image["width"] < self.min_image_size or base_image["height"] < self.min_image_size:
                     continue
 
                 # 获取图片位置
@@ -199,7 +211,9 @@ class PDFParser(BaseParser):
                 """
                 image_description = ""
                 if self.vision_llm:
-                    image_description = self._describe_image(image_bytes)
+                    image_description = self._describe_image(image_bytes, base_image["ext"])
+                    if image_description:
+                        print(f"视觉模型处理pdf图片，获得图片描述：{image_description[:100]}")
 
                 elements.append(
                     PDFElement(
@@ -208,8 +222,8 @@ class PDFParser(BaseParser):
                         page_num=page_num,
                         bbox=bbox,
                         metadata={
-                            "width": pil_image.width,
-                            "height": pil_image.height,
+                            # "width": pil_image.width,
+                            # "height": pil_image.height,
                             "format": base_image.get("ext", "unknown"),
                             "image_index": img_index,
                             "base64": base64.b64encode(image_bytes).decode()  # 用于在前端渲染图片
@@ -244,8 +258,8 @@ class PDFParser(BaseParser):
                         page_num=page_num,
                         bbox=table.bbox,
                         metadata={
-                            "rows": len(table_data),
-                            "cols": len(table_data[0]) if table_data else 0,
+                            # "rows": len(table_data),
+                            # "cols": len(table_data[0]) if table_data else 0,
                             "raw_data": table_data,
                         }
                     )
@@ -297,7 +311,7 @@ class PDFParser(BaseParser):
 
         return max(sizes) if sizes else 12
 
-    def _describe_image(self, image_bytes: bytes) -> str:
+    def _describe_image(self, image_bytes: bytes, image_format: str = "png") -> str:
         """使用视觉模型模数图片"""
         if not self.vision_llm:
             return ""
@@ -315,7 +329,7 @@ class PDFParser(BaseParser):
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/png;base64,{base64_image}"
+                                "url": f"data:image/{image_format};base64,{base64_image}"
                             }
                         }
                     ]
@@ -419,6 +433,8 @@ class PDFParser(BaseParser):
                     "page_num": page_num + 1,
                     "total_pages": total_pages,
                     "type": "text",
+                    "ext": "pdf",
+                    "create_time": datetime.datetime.now(ZoneInfo("Asia/Shanghai")).isoformat()
                 }
             ))
 
@@ -432,7 +448,9 @@ class PDFParser(BaseParser):
                             "file_name": file_name,
                             "page_num": page_num + 1,
                             "type": "image",
-                            "bbox": image_part.bbox,
+                            "ext": "pdf",
+                            # "bbox": image_part.bbox,
+                            "create_time": datetime.datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
                             **image_part.metadata,
                         }
                     ))

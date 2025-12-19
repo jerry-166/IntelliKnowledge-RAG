@@ -4,11 +4,13 @@ markdown解析器
 todo: 表格、链接怎么换回去，可以记录位置吗？
 todo: Markdown格式保留处理？标题、正文...
 """
+import datetime
 import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from langchain_community.document_loaders import UnstructuredMarkdownLoader
 from langchain_core.documents import Document
@@ -84,8 +86,10 @@ class MultimodalMarkdownParser(BaseParser):
                 "source": str(file_path),
                 "type": "text",
                 "file_name": file_path.name,
-                "total_images": len(image_elements),
-                "text_len": len(final_text),
+                "ext": "md",
+                'create_time': datetime.datetime.now(ZoneInfo("Asia/Shanghai")).isoformat()
+                # "total_images": len(image_elements),
+                # "text_len": len(final_text),
             }
         )
         documents.append(text_document)
@@ -113,36 +117,52 @@ class MultimodalMarkdownParser(BaseParser):
         """处理图片：OCR / 视觉模型识别"""
 
         try:
+            image = ImageUtil.load_image(img_path, base_dir)
+            if not image:
+                print(f"图片加载失败，返回None")
+                return None
+
             content = ""
             process_type = ""
-            image = ImageUtil.load_image(img_path, base_dir)
-            image_bytes = image.tobytes()
-            if not image_bytes:
-                return None
 
             # 视觉模型/OCR识别
             if self.use_vision and self.vision_llm:
-                content = OcrUtil.vision_ocr(vision_llm=self.vision_llm, image_bytes=image_bytes)
-                process_type = self.vision_llm.model_name
+                content = OcrUtil.vision_ocr(vision_llm=self.vision_llm, image=image)
+                if content:  # 只有在成功获取内容时才设置process_type
+                    process_type = self.vision_llm.model_name
+                else:
+                    print("视觉LLM识别失败，尝试回退到Tesseract OCR")
+                    # 回退到Tesseract OCR
+                    if self.use_ocr:
+                        content = OcrUtil.tesseract_ocr(image=image)
+                        if content:
+                            process_type = "tesseracts OCR"
             elif self.use_ocr:
-                content = OcrUtil.tesseract_ocr(image_bytes)
+                content = OcrUtil.tesseract_ocr(image=image)
                 process_type = "tesseracts OCR"
             else:
+                return None
+
+            # 如果所有方法都失败了
+            if not content:
+                print(f"所有OCR方法都失败了，返回None")
                 return None
 
         except Exception as e:
             print(f"处理图片失败 {img_path}: {e}")
             return None
 
+        print(f"处理MD图片成功，{content[:100]}")
         element = MarkdownElement(
             type=ElementType.IMAGE,
             content=content,
             metadata={
                 'source': img_path,
                 'alt_text': alt_text,
-                'raw': f"![{alt_text}]({img_path})",
-                'base_dir': str(base_dir),
+                # 'raw': f"![{alt_text}]({img_path})",
+                # 'base_dir': str(base_dir),
                 'ocr_': process_type,
+                'ext': "md",
             }
         )
         return element
@@ -187,6 +207,7 @@ class MultimodalMarkdownParser(BaseParser):
                 metadata={
                     "type": "image",
                     **image_element.metadata,
+                    "create_time": datetime.datetime.now(ZoneInfo("Asia/Shanghai")).isoformat()
                 }
             )
             image_documents.append(image_document)
@@ -202,8 +223,8 @@ if __name__ == '__main__':
     documents = parser.parse(r"C:\Users\ASUS\Desktop\makedown\deepAgent.md")
 
     # 分离文本Document和图片Documents
-    text_documents = [doc for doc in documents if doc.metadata.get("type") == "markdown_text"]
-    image_documents = [doc for doc in documents if doc.metadata.get("type") == "markdown_image"]
+    text_documents = [doc for doc in documents if doc.metadata.get("type") == "text"]
+    image_documents = [doc for doc in documents if doc.metadata.get("type") == "image"]
 
     text_doc = text_documents[0] if text_documents else None
     image_docs = image_documents
