@@ -4,7 +4,7 @@
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, List
 
 import yaml
 
@@ -83,6 +83,29 @@ class VectorStoreConfig:
     max_retries: int = 3
     timeout: int = 60
     save_queries_num: int = 1000
+
+
+@dataclass
+class KeywordSearchConfig:
+    """关键词检索配置"""
+    enabled: bool = True
+
+    # 检索后端: bm25 | elasticsearch | meilisearch
+    backend: Literal["bm25", "elasticsearch", "meilisearch"] = "bm25"
+
+    # BM25参数
+    bm25_k1: float = 1.5  # 词频饱和参数
+    bm25_b: float = 0.75  # 文档长度归一化参数
+
+    # 分词器: jieba | simple | whitespace
+    tokenizer: Literal["jieba", "simple", "whitespace"] = "jieba"
+
+    # 停用词
+    use_stopwords: bool = True
+    custom_stopwords: List[str] = field(default_factory=list)
+
+    # elasticsearch参数
+    es_host: str = "localhost"
 
 
 @dataclass

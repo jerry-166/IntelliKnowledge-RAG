@@ -4,6 +4,7 @@ RAG检索的主流程
 import logging
 from pathlib import Path
 from typing import Optional, Literal, Any
+from uuid import uuid4
 
 from basic_core.llm_factory import qwen_vision
 from python_services.core.settings import RAGConfig, get_config
@@ -129,10 +130,10 @@ class RAGPipeline:
         parser = self.parsers.get(suffix)
         if not parser:
             raise ValueError(f"❌️No parser for format: {suffix}")
-
         # 解析文档
         logger.info(f"Parsing file: {file_path}")
         documents = parser.parse(file_path)
+
         # 切分文档
         logger.info(f"Splitting {len(documents)} documents")
         split_documents = self.splitter.split_documents_(documents, file_suffix=suffix)
@@ -145,6 +146,17 @@ class RAGPipeline:
         )
 
         return len(doc_ids)
+
+    def parse_file(self, file_path):
+        path = Path(file_path)
+        suffix = path.suffix.lower().lstrip('.')
+        parser = self.parsers.get(suffix)
+        if not parser:
+            raise ValueError(f"❌️No parser for format: {suffix}")
+        # 解析文档
+        logger.info(f"Parsing file: {file_path}")
+        documents = parser.parse(file_path)
+        return documents
 
     def ingest_directory(self, dir_path: str, show_progress: bool = False):
         """
