@@ -5,6 +5,7 @@
 """
 import hashlib
 import logging
+import math
 import pickle
 import re
 from abc import ABC, abstractmethod
@@ -23,15 +24,17 @@ logger = logging.getLogger(__name__)
     NLP中中文分词器
 3. set的update是添加还是替换 --- 添加
 
+4. 熟悉一下es的操作命令
+
 """
 
 
 @dataclass
-class RetrieveResult:
+class KeywordSearchResult:
     """
     检索结果
     """
-    documents: Document
+    document: Document
     score: float = 0.0
     matched_terms: list[str] = field(default_factory=list)  # 存储匹配到的词
     rank: int = 0
@@ -48,7 +51,7 @@ class BaseKeywordRetriever(ABC):
         pass
 
     @abstractmethod
-    def search(self, query: str, top_k: int = 5) -> list[RetrieveResult]:
+    def search(self, query: str, top_k: int = 5) -> list[KeywordSearchResult]:
         """检索"""
         pass
 
@@ -215,8 +218,60 @@ class BM25Retriever(BaseKeywordRetriever):
 
             logger.info(f"✅ BM25索引更新完成，共{len(self.documents)}个文档")
 
-    def search(self, query: str, top_k: int = 5) -> list[RetrieveResult]:
-        pass
+    def search(self, query: str, top_k: int = 5) -> list[KeywordSearchResult]:
+        # 非空判断
+        if not query or not self.documents:
+            return []
+
+        # 把query进行分词
+        query_tokens = self.tokenizer.tokenize(query)
+        # 非空判断
+        if not query_tokens:
+            return []
+
+        # 然后查询构建分数
+        scores = {}  # 每一个文档的分数
+        matched_terms = {}  # 匹配的词
+
+        for term in query_tokens:
+            # 索引中没有该词，跳过
+            if term not in self.inverted_index:
+                continue
+
+            idf = self._cal_idf(len(self.documents), self.doc_freqs[term])
+            # 遍历含该词的所有文档
+            for doc_idx, term_freq in self.inverted_index[term]:
+                # 初始化赋值
+                if doc_idx not in scores:
+                    scores[doc_idx] = 0.0
+                    matched_terms[doc_idx] = []
+                # 计算BM25分数 + 匹配词
+                scores[doc_idx] += self._cal_bm25_score(term_freq, self.doc_lengths[doc_idx], idf)
+                matched_terms[doc_idx].append(term)
+
+        # 对结果排序
+        sorted_results = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+        # 封装结果并返回
+        return [
+            KeywordSearchResult(
+                document=self.documents[doc_idx],
+                score=score,
+                matched_terms=matched_terms[doc_idx],
+                rank=i,
+            ) for i, (doc_idx, score) in enumerate(sorted_results[:top_k], 1)
+        ]
+
+    def _cal_bm25_score(self, tf: int, doc_len: int, idf: float) -> float:
+        """计算单个词的BM25分数"""
+        numerator = tf * (self.k1 + 1)
+        denominator = tf + self.k1 * (1 - self.b + self.b * doc_len / self.avgdl)
+        return idf * numerator / denominator
+
+    def _cal_idf(self, n: int, df: int) -> float:
+        """计算idf"""
+        import math
+        return math.log((n - df + 0.5) / (df + 0.5) + 1)
 
     def delete(self, ids: list[str]) -> bool:
         """删除索引较复杂，这里简化使用排除需删除的ids，然后重建索引"""
@@ -294,17 +349,140 @@ class ElasticSearchRetriever(BaseKeywordRetriever):
     ElasticSearch 检索器
     """
 
-    def __init__(self, ):
-        pass
+    def __init__(
+            self,
+            host: str = "localhost",
+            port: int = 9200,
+            index_name: str = "rag_documents",
+            username: Optional[str] = None,
+            password: Optional[str] = None,
+    ):
+        try:
+            from elasticsearch import Elasticsearch
+        except ImportError:
+            raise ImportError("请安装 elasticsearch: pip install elasticsearch")
+
+        es_config = {"hosts": [f"http://{host}:{port}"]}
+        if username and password:
+            es_config["basic_auth"] = (username, password)
+
+        # 连接ES
+        self.es = Elasticsearch(**es_config)
+        self.index_name = index_name
+        # 创建索引
+        self._create_index()
+
+    def _create_index(self):
+        # 判断索引是否已存在
+        if self.es.indices.exists(index=self.index_name):
+            return
+
+        # 创建索引
+        mapping = {
+            "settings": {
+                "analysis": {
+                    "analyzer": {
+                        "ik_smart_analyzer": {
+                            "type": "custom",
+                            "tokenizer": "ik_max_word",  # 需要安装IK分词插件
+                            "filter": ["lowercase"]
+                        }
+                    }
+                }
+            },
+            "mappings": {
+                "properties": {
+                    "content": {
+                        "type": "text",
+                        "analyzer": "ik_smart_analyzer",
+                        "search_analyzer": "ik_smart"
+                    },
+                    "metadata": {
+                        "type": "object",
+                        "enabled": True
+                    },
+                    "doc_id": {
+                        "type": "keyword"
+                    }
+                }
+            }
+        }
+
+        try:
+            self.es.indices.create(index=self.index_name, body=mapping)
+        except Exception as e:
+            # 可能是IK分词器未安装
+            logger.warning(f"IK分词器可能未安装，使用标准分词: {e}")
+            mapping["settings"] = {}
+            mapping["mappings"]["properties"]["content"]["analyzer"] = "standard"
+            self.es.indices.create(index=self.index_name, body=mapping)
 
     def add_documents(self, documents: list[Document]):
-        pass
+        """批量添加文档"""
+        from elasticsearch.helpers import bulk
 
-    def search(self, query: str, top_k: int = 5) -> list[RetrieveResult]:
-        pass
+        actions = []
+        for doc in documents:
+            doc_id = hashlib.md5(doc.page_content.encode()).hexdigest()
+            actions.append({
+                "_index": self.index_name,
+                "_id": doc_id,
+                "_source": {
+                    "content": doc.page_content,
+                    "metadata": doc.metadata,
+                    "doc_id": doc_id,
+                }
+            })
 
-    def delete(self, ids: list[str]):
-        pass
+        bulk(self.es, actions)
+        self.es.indices.refresh(index=self.index_name)
+        logger.info(f"✅ ES索引更新完成，添加{len(documents)}个文档")
 
-    def clear(self):
-        pass
+    def search(self, query: str, top_k: int = 5) -> list[KeywordSearchResult]:
+        """es检索"""
+        body = {
+            "query": {
+                "multi_match": {
+                    "query": query,
+                    "fields": ["content"],
+                    "type": "best_fields",
+                }
+            },
+            "size": top_k,
+            "highlight": {
+                "field": {
+                    "content": {}
+                }
+            }
+        }
+
+        response = self.es.search(index=self.index_name, body=body)
+        if not response:
+            return []
+
+        results = []
+        for rank, hit in enumerate(response["hits"]["hits"], 1):
+            doc = Document(
+                page_content=hit["_source"]["content"],
+                metadata=hit["_source"].get("metadata", {})
+            )
+            results.append(KeywordSearchResult(
+                document=doc,
+                score=hit["_score"],
+                matched_terms=[],  # ES不直接返回匹配词
+                rank=rank
+            ))
+
+        return results
+
+    def delete(self, doc_ids: list[str]) -> bool:
+        """删除文档"""
+        for doc_id in doc_ids:
+            self.es.delete(index=self.index_name, id=doc_id, ignore=[404])
+        return True
+
+    def clear(self) -> bool:
+        """清空索引"""
+        self.es.delete(index=self.index_name, ignore=[404])
+        self._create_index()
+        return True

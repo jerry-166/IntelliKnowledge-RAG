@@ -190,10 +190,8 @@ class MultimodalVectorStore(BaseVectorStore):
         top_k = top_k or self.rag_config.vector_store.default_top_k
 
         # 查缓存
-        cache_key = None
         if use_cache and self.cache:
-            cache_key = query
-            cached = self.cache.get(cache_key)
+            cached = self.cache.get(query)
             if cached:
                 logger.info(f"✅️缓存命中，问题：{query[:50]}")
                 self.metrics.cache_hits += 1
@@ -210,7 +208,7 @@ class MultimodalVectorStore(BaseVectorStore):
 
         # 写入缓存
         if use_cache and self.cache:
-            self.cache.set(cache_key, results)
+            self.cache.set(query, results)
 
         # 记录指标
         elapsed_ms = (time.perf_counter() - start_time) * 1000
@@ -218,61 +216,6 @@ class MultimodalVectorStore(BaseVectorStore):
         logger.info(f"✅️MultimodalVectorStore查询完成，问题：{query[:50]}")
 
         return results
-
-    def _execute_search_store(
-            self,
-            query: str,
-            top_k: int,
-            filter_dict: Optional[dict[str, Any]] = None,
-            search_type: Literal["text", "image", "hybrid"] = "text",
-    ) -> list[SearchResult]:
-        """从store中查询"""
-        all_results = []
-        if search_type in ["text", "hybrid"] and self.text_store:
-            text_results = self._search_store(self.text_store, query, top_k, filter_dict)
-            all_results.extend(text_results)
-
-        if search_type in ["image", "hybrid"] and hasattr(self, "image_store"):
-            image_results = self._search_store(self.image_store, query, top_k, filter_dict)
-            all_results.extend(image_results)
-
-        # 对hybrid的结果进行排序（其他两种模式返回结果本就是有序的）
-        if search_type == "hybrid" and hasattr(self, "image_store") and self.image_store:
-            all_results.sort(key=lambda x: x.score, reverse=True)
-            # 取前top_k
-            all_results = all_results[:top_k]
-
-        # 给结果rank编号
-        for i, result in enumerate(all_results):
-            result.rank = i + 1
-
-        return all_results
-
-    def _search_store(
-            self,
-            store,
-            query: str,
-            top_k: int,
-            filter_dict: Optional[Dict],
-    ) -> List[SearchResult]:
-        """从指定存储检索"""
-        try:
-            docs_with_scores = store.similarity_search_with_score(
-                query,
-                k=top_k,
-                filter=filter_dict,
-            )
-
-            return [
-                SearchResult(
-                    document=document,
-                    score=score,
-                    rank=1,
-                ) for document, score in docs_with_scores
-            ]
-        except Exception as e:
-            logger.error(f"❌️MultimodalVectorStore查询'{store}'失败，{e}")
-            return []
 
     @time_counter  # 索引构建时间
     @retry_on_failure()  # 向量库写入可能超时（网络，io等）
@@ -348,6 +291,61 @@ class MultimodalVectorStore(BaseVectorStore):
         )
 
         return ids
+
+    def _execute_search_store(
+            self,
+            query: str,
+            top_k: int,
+            filter_dict: Optional[dict[str, Any]] = None,
+            search_type: Literal["text", "image", "hybrid"] = "text",
+    ) -> list[SearchResult]:
+        """从store中查询"""
+        all_results = []
+        if search_type in ["text", "hybrid"] and self.text_store:
+            text_results = self._search_store(self.text_store, query, top_k, filter_dict)
+            all_results.extend(text_results)
+
+        if search_type in ["image", "hybrid"] and hasattr(self, "image_store"):
+            image_results = self._search_store(self.image_store, query, top_k, filter_dict)
+            all_results.extend(image_results)
+
+        # 对hybrid的结果进行排序（其他两种模式返回结果本就是有序的）
+        if search_type == "hybrid" and hasattr(self, "image_store") and self.image_store:
+            all_results.sort(key=lambda x: x.score, reverse=True)
+            # 取前top_k
+            all_results = all_results[:top_k]
+
+        # 给结果rank编号
+        for i, result in enumerate(all_results):
+            result.rank = i + 1
+
+        return all_results
+
+    def _search_store(
+            self,
+            store,
+            query: str,
+            top_k: int,
+            filter_dict: Optional[Dict],
+    ) -> List[SearchResult]:
+        """从指定存储检索"""
+        try:
+            docs_with_scores = store.similarity_search_with_score(
+                query,
+                k=top_k,
+                filter=filter_dict,
+            )
+
+            return [
+                SearchResult(
+                    document=document,
+                    score=score,
+                    rank=1,
+                ) for document, score in docs_with_scores
+            ]
+        except Exception as e:
+            logger.error(f"❌️MultimodalVectorStore查询'{store}'失败，{e}")
+            return []
 
     def _clean_metadata(self, documents: list[Document]) -> list[Document]:
         """清理文档中的复杂元数据"""

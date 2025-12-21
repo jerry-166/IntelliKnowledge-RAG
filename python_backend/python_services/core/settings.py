@@ -106,6 +106,23 @@ class KeywordSearchConfig:
 
     # elasticsearch参数
     es_host: str = "localhost"
+    es_port: int = 9200
+    es_index_name: str = "rag_documents"
+
+    # es用户密码信息
+    es_username: Optional[str] = None
+    es_password: Optional[str] = None
+
+
+@dataclass
+class RetrieverConfig:
+    """检索器配置"""
+    # 混合检索配置
+    hybrid_enabled: bool = True
+    vector_weight: float = 0.6
+    keyword_weight: float = 0.4
+    fusion_method: Literal["rrf", "weighted", "dbsf"] = "rrf"
+    rrf_k: int = 60
 
 
 @dataclass
@@ -180,6 +197,8 @@ class RAGConfig:
     parser: ParseConfig = field(default_factory=ParseConfig)
     splitter: SplitterConfig = field(default_factory=SplitterConfig)
     vector_store: VectorStoreConfig = field(default_factory=VectorStoreConfig)
+    keyword_search: KeywordSearchConfig = field(default_factory=KeywordSearchConfig)
+    # retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     reranker: RerankerConfig = field(default_factory=RerankerConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
@@ -199,6 +218,8 @@ class RAGConfig:
             parser=ParseConfig(**data.get("parser", {})),
             splitter=SplitterConfig(**data.get("splitter", {})),
             vector_store=VectorStoreConfig(**data.get("vector_store", {})),
+            keyword_search=KeywordSearchConfig(**data.get("keyword_search", {})),
+            # retriever=RetrieverConfig(**data.get("retriever", {})),
             embedding=EmbeddingConfig(**data.get("embedding", {})),
             reranker=RerankerConfig(**data.get("reranker", {})),
             cache=CacheConfig(**data.get("cache", {})),
