@@ -2,29 +2,12 @@
 混合检索---向量检索 + 关键词检索
 """
 import logging
-from dataclasses import dataclass
 from typing import Optional, List, Literal, Dict, Any
-
 from langchain_core.documents import Document
-
-from core.search_results import SearchResult
-from retriever.keyword_retriever import BM25Retriever, ElasticSearchRetriever, KeywordSearchResult
-from vector_store.multimodal_store import MultimodalVectorStore
+from python_services.core.search_results import SearchResult, HybridSearchResult
+from python_services.retriever.keyword_retriever import BM25Retriever, ElasticSearchRetriever, KeywordSearchResult
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class HybridSearchResult:
-    """混合检索结果"""
-    document: Document
-    final_score: float
-    vector_score: Optional[float] = None
-    keyword_score: Optional[float] = None
-    vector_rank: Optional[int] = None
-    keyword_rank: Optional[int] = None
-    matched_terms: List[str] = None
-    rank: int = 0
 
 
 class HybridRetriever:
@@ -54,34 +37,39 @@ class HybridRetriever:
 
         self._init_keyword_retriever(keyword_config)
 
-    def _init_keyword_retriever(self, config: dict):
+    def _init_keyword_retriever(self, config):
         """初始化关键词检索器"""
-        backend = config.get("backend", "bm25")
+        # 修改这一行：使用属性访问代替字典访问
+        backend = config.backend
 
         if backend == "bm25":
             self.keyword_retriever = BM25Retriever(
-                k1=config.get("bm25_k1", 1.5),
-                b=config.get("bm25_b", 0.75),
-                tokenizer=config.get("tokenizer", "jieba"),
-                use_stopwords=config.get("use_stopwords", True),
-                custom_stopwords=config.get("custom_stopwords", []),
-                persist_path=config.get("persist_path"),
+                k1=config.bm25_k1,
+                b=config.bm25_b,
+                tokenizer=config.tokenizer,
+                use_stopwords=config.use_stopwords,
+                custom_stopwords=config.custom_stopwords,
+                persist_path=config.persist_path,
             )
         elif backend == "elasticsearch":
             self.keyword_retriever = ElasticSearchRetriever(
-                host=config.get("es_host", "localhost"),
-                port=config.get("es_port", 9200),
-                index_name=config.get("es_index_name", "rag_documents"),
+                host=config.es_host,
+                port=config.es_port,
+                index_name=config.es_index_name,
             )
         else:
             raise ValueError(f"不支持的关键词检索后端: {backend}")
 
         logger.info(f"✅ 关键词检索器初始化完成: {backend}")
 
-    def add_documents(self, documents: list[Document]):
+    def add_documents(self, documents: list[Document]) -> list[str]:
         """添加文档到向量存储和关键词存储库中"""
-        self.vector_store.add_documents(documents=documents, batch_size=16, show_progress=False)
-        self.keyword_retriever.add_documents(documents=documents)
+        doc_ids = []
+        v_ids = self.vector_store.add_documents(documents=documents, batch_size=16, show_progress=False)
+        k_ids = self.keyword_retriever.add_documents(documents=documents)
+        doc_ids.extend(v_ids)
+        doc_ids.extend(k_ids)
+        return doc_ids
 
     def search(
             self,
@@ -113,7 +101,7 @@ class HybridRetriever:
         keyword_k = keyword_top_k or top_k * 2
 
         # 1. 向量检索
-        vector_results = self.vector_store.results(
+        vector_results = self.vector_store.search(
             query=query,
             top_k=vector_k,
             filter_dict=filter_dict,
@@ -121,11 +109,11 @@ class HybridRetriever:
             use_reranker=False,  # 重排序在融合后进行
             use_cache=False,  # 混合检索单独管理缓存  # todo: 缓存机制有点重复... 混合和之前的向量混在一个缓存目录下
         )
-        logger.info("向量召回{len(vector_results)}个")
+        logger.info(f"向量召回{len(vector_results)}个")
 
         # 2. 关键词检索
         keyword_results = self.keyword_retriever.search(query, top_k=keyword_k)
-        logger.info("关键词召回{len(keyword_results)}个")
+        logger.info(f"关键词召回{len(keyword_results)}个")
 
         # 根据不同的融合方法 - 融合结果
         fused_results = []
@@ -146,6 +134,21 @@ class HybridRetriever:
         # 指标记录...
 
         return final_results
+
+    def _build_hybrid_result(self, results, top_k):
+        hybrid_results = []
+        for rank, doc_data in enumerate(results[:top_k], 1):
+            hybrid_results.append(HybridSearchResult(
+                document=doc_data["document"],
+                score=doc_data["rrf_score"],
+                vector_score=doc_data["vector_score"],
+                keyword_score=doc_data["keyword_score"],
+                vector_rank=doc_data["vector_rank"],
+                keyword_rank=doc_data["keyword_rank"],
+                matched_terms=doc_data["matched_terms"],
+                rank=rank
+            ))
+        return hybrid_results
 
     def _rrf_fusion(
             self,
@@ -205,19 +208,7 @@ class HybridRetriever:
         # 排序
         sorted_results = sorted(doc_scores.values(), key=lambda x: x["rrf_score"], reverse=True)
         # 封装并返回
-        results = []
-        for rank, doc_data in enumerate(sorted_results[:top_k], 1):
-            results.append(HybridSearchResult(
-                document=doc_data["document"],
-                final_score=doc_data["rrf_score"],
-                vector_score=doc_data["vector_score"],
-                keyword_score=doc_data["keyword_score"],
-                vector_rank=doc_data["vector_rank"],
-                keyword_rank=doc_data["keyword_rank"],
-                matched_terms=doc_data["matched_terms"],
-                rank=rank
-            ))
-
+        results = self._build_hybrid_result(sorted_results, top_k)
         return results
 
     def _weighted_fusion(
@@ -284,18 +275,7 @@ class HybridRetriever:
         # 排序
         sorted_results = sorted(doc_scores.values(), key=lambda x: x["weighted_score"], reverse=True)
         # 封装并返回
-        results = []
-        for rank, doc in enumerate(sorted_results[:top_k], 1):
-            results.append(HybridSearchResult(
-                document=doc["document"],
-                final_score=doc["weighted_score"],
-                vector_score=doc["vector_score"],
-                keyword_score=doc["keyword_score"],
-                vector_rank=doc["vector_rank"],
-                keyword_rank=doc["keyword_rank"],
-                matched_terms=doc["matched_terms"],
-                rank=rank
-            ))
+        results = self._build_hybrid_result(sorted_results, top_k)
         return results
 
     def _dbsf_fusion(
@@ -360,19 +340,7 @@ class HybridRetriever:
         # 排序
         sorted_results = sorted(doc_scores.values(), key=lambda x: x["dbsf_score"], reverse=True)
         # 封装并返回
-        results = []
-        for rank, doc_data in enumerate(sorted_results[:top_k], 1):
-            results.append(HybridSearchResult(
-                document=doc_data["document"],
-                final_score=doc_data["dbsf_score"],
-                vector_score=doc_data["vector_score"],
-                keyword_score=doc_data["keyword_score"],
-                vector_rank=doc_data["vector_rank"],
-                keyword_rank=doc_data["keyword_rank"],
-                matched_terms=doc_data["matched_terms"],
-                rank=rank
-            ))
-
+        results = self._build_hybrid_result(sorted_results, top_k)
         return results
 
     def clear(self):
@@ -385,22 +353,3 @@ class HybridRetriever:
         import hashlib
         content = document.page_content[:500]  # 使用前500字符进行hash加密
         return hashlib.md5(content.encode()).hexdigest()
-
-
-if __name__ == '__main__':
-    from core.settings import RetrieverConfig
-
-    multimodal_vector_store = MultimodalVectorStore()
-    retriever_config = RetrieverConfig()
-    hybrid_retriever = HybridRetriever(
-        vector_store=multimodal_vector_store,
-        keyword_config=multimodal_vector_store.rag_config.keyword_config,
-        vector_weight=retriever_config.vector_weight,
-        keyword_weight=retriever_config.keyword_weight,
-        fusion_method=retriever_config.fusion_method,
-        rrf_k=retriever_config.rrf_k,
-    )
-
-    hybrid_retriever.add_documents([])
-    query = ""
-    results = hybrid_retriever.search(query=query)

@@ -7,18 +7,18 @@ from typing import Optional, Literal, Any
 from uuid import uuid4
 
 from basic_core.llm_factory import qwen_vision
-from python_services.core.settings import RAGConfig, get_config
-from python_services.parsers.image_parser import ImageParser
-from python_services.parsers.markdown_parser import MultimodalMarkdownParser
-from python_services.parsers.pdf_parser import PDFParser
-from python_services.parsers.ppt_parser import PPtParser
-from python_services.parsers.text_parser import TextParser
-from python_services.parsers.web_parser import WebParser
-from python_services.parsers.word_parser import WordParser
-from python_services.splitter.integration_splitter import IntegrationSplitter
-from python_services.vector_store.multimodal_store import MultimodalVectorStore
-import python_services.core.logger_config
-
+from python_backend.python_services.core.settings import RAGConfig, get_config
+from python_backend.python_services.parsers.image_parser import ImageParser
+from python_backend.python_services.parsers.markdown_parser import MultimodalMarkdownParser
+from python_backend.python_services.parsers.pdf_parser import PDFParser
+from python_backend.python_services.parsers.ppt_parser import PPtParser
+from python_backend.python_services.parsers.text_parser import TextParser
+from python_backend.python_services.parsers.web_parser import WebParser
+from python_backend.python_services.parsers.word_parser import WordParser
+from python_backend.python_services.splitter.integration_splitter import IntegrationSplitter
+from python_backend.python_services.vector_store.multimodal_store import MultimodalVectorStore
+import python_backend.python_services.core.logger_config
+from python_services.retriever.hybrid_retriever import HybridRetriever
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,9 @@ class RAGPipeline:
         self._init_parsers()
         self._init_splitter()
         self._init_vector_store()
+        self.retriever_config = self.config.retriever
+        if self.retriever_config.hybrid_enabled:
+            self._init_hybrid_retriever()
 
         logger.info("✅️RAG Pipeline initialized")
 
@@ -114,6 +117,17 @@ class RAGPipeline:
             rag_config=self.config,
         )
 
+    def _init_hybrid_retriever(self):
+        self.hybrid_retriever = HybridRetriever(
+            vector_store=self.vector_store,
+            keyword_config=self.config.keyword_search,
+            vector_weight=self.retriever_config.vector_weight,
+            keyword_weight=self.retriever_config.keyword_weight,
+            fusion_method=self.retriever_config.fusion_method,
+            rrf_k=self.retriever_config.rrf_k
+        )
+        logger.info("✅️ 混合检索器初始化成功")
+
     def ingest(self, file_path: str, show_progress: bool = False):
         """
         摄入文档
@@ -139,11 +153,14 @@ class RAGPipeline:
         split_documents = self.splitter.split_documents_(documents, file_suffix=suffix)
         # 存储向量
         logger.info(f"Storing {len(split_documents)} chunks")
-        doc_ids = self.vector_store.add_documents(
-            split_documents,
-            batch_size=self.config.vector_store.batch_size,
-            show_progress=show_progress
-        )
+        if not self.retriever_config.hybrid_enabled:
+            doc_ids = self.vector_store.add_documents(
+                split_documents,
+                batch_size=self.config.vector_store.batch_size,
+                show_progress=show_progress
+            )
+        else:
+            doc_ids = self.hybrid_retriever.add_documents(split_documents)
 
         return len(doc_ids)
 
@@ -174,6 +191,16 @@ class RAGPipeline:
 
         return total
 
+    def get_stats(self):
+        """获取统计信息"""
+        return {
+            "vector_store": self.vector_store.get_stats(),
+            "parsers": {
+                name: parser.get_stats()
+                for name, parser in self.parsers.items()
+            }
+        }
+
     def search(
             self,
             query: str,
@@ -197,38 +224,42 @@ class RAGPipeline:
         Returns:
             检索结果列表
         """
-        search_results = self.vector_store.search(
-            query=query, top_k=top_k, filter_dict=filter_dict,
-            search_type=search_type, use_reranker=use_reranker,
-            use_cache=use_cache
-        )
+        if not self.retriever_config.hybrid_enabled:
+            logger.info("向量存储库中查询中...")
+            search_results = self.vector_store.search(
+                query=query, top_k=top_k, filter_dict=filter_dict,
+                search_type=search_type, use_reranker=use_reranker,
+                use_cache=use_cache
+            )
+        else:
+            logger.info("混合存储库中查询中...")
+            search_results = self.hybrid_retriever.search(
+                query, top_k, filter_dict,
+            )
         return [r.to_dict() for r in search_results]
 
-    def get_stats(self):
-        """获取统计信息"""
+    def as_retriever(self):
+        """返回retriever"""
+        pass
+
+    def call(self, query: str):
+        results = self.search(
+            query=query,
+            filter_dict={},
+            search_type="hybrid",
+            top_k=5,
+            use_reranker=True,
+        )
+        for i, result in enumerate(results, 1):
+            print(f"\n--- Result {i} (score: {result['score']:.4f}) ---")
+            print(f"Content: {result['content'][:200]}...")
+        # 查看统计
+        print("\n--- Stats ---")
+        print(self.get_stats())
         return {
-            "vector_store": self.vector_store.get_stats(),
-            "parsers": {
-                name: parser.get_stats()
-                for name, parser in self.parsers.items()
-            }
+            "answer": "",
+            "context": "",
         }
-
-
-def call(query: str):
-    results = pipeline.search(
-        query=query,
-        filter_dict={"ext": "pdf"},
-        search_type="hybrid",
-        top_k=5,
-        use_reranker=True,
-    )
-    for i, result in enumerate(results, 1):
-        print(f"\n--- Result {i} (score: {result['score']:.4f}) ---")
-        print(f"Content: {result['content'][:200]}...")
-    # 查看统计
-    print("\n--- Stats ---")
-    print(pipeline.get_stats())
 
 
 if __name__ == '__main__':
@@ -244,7 +275,8 @@ if __name__ == '__main__':
     # pipeline.ingest(file_name, show_progress=True)
 
     # 检索
-    call("是一个由几何形状构成的抽象图形标志，不包含任何文字、数据或传统意义上的图表。其内容描述如下：- **整体结构**：图像由几个相互交叠的红色和灰色几何形状组成，整体呈现动态和现代感。")
+    pipeline.call("人机互动插图")
     # call("什么事提示词工程？")
     # call("西北工业大学最高是多少？")
     # call("西北工业大学最高分是多少？")
+    # call("subagent由什么组成？")

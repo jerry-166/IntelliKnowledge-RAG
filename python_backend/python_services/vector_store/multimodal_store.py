@@ -19,9 +19,9 @@ from basic_core.llm_factory import qwen_vision, init_embedding_basic
 from python_services.core.cache_manager import CacheManager
 from python_services.core.settings import get_config, RAGConfig
 from python_services.embeddings.clip_embedding import CLIPEmbeddings
-from python_services.parsers.pdf_parser import PDFParser
+from python_backend.python_services.parsers.pdf_parser import PDFParser
 from python_services.reranker.reranker_ import Reranker
-from python_services.splitter.integration_splitter import IntegrationSplitter
+from python_backend.python_services.splitter.integration_splitter import IntegrationSplitter
 from python_services.utils.index_util import IndexUtil
 from python_services.vector_store.base_store import BaseVectorStore, SearchResult
 
@@ -162,6 +162,7 @@ class MultimodalVectorStore(BaseVectorStore):
     """
 
     def __init__(self, rag_config: Optional[RAGConfig] = None):
+        self.store_type = rag_config.vector_store.store_type
         self.rag_config = rag_config if rag_config else get_config()
         self.metrics = VectorStoreMetrics(self.rag_config.vector_store.save_queries_num)
 
@@ -213,7 +214,7 @@ class MultimodalVectorStore(BaseVectorStore):
         # 记录指标
         elapsed_ms = (time.perf_counter() - start_time) * 1000
         self.metrics.record_query(elapsed_ms)
-        logger.info(f"✅️MultimodalVectorStore查询完成，问题：{query[:50]}")
+        logger.info(f"✅️MultimodalVectorStore查询完成，结果：{len(results)}，问题：{query[:50]}")
 
         return results
 
@@ -253,14 +254,16 @@ class MultimodalVectorStore(BaseVectorStore):
         # 分类
         text_docs = []
         image_docs = []
-        if self._has_clip:  # 如果使用clip，额外搞一个向量空间
-            for doc in deduplicated_documents:
-                if doc.metadata.get("type", "text") == "image":
-                    image_docs.append(doc)
-                else:
-                    text_docs.append(doc)
-        else:  # 不使用，默认图片和文本在一个向量空间？
+        if self.store_type == "image" and self._has_clip:  # 如果使用clip，默认放在clip嵌入的向量空间中
+            image_docs = documents
+        elif self.store_type == "text":  # 不使用，默认图片和文本在一个向量空间
             text_docs = documents
+        else:  # 混合模式则是分开放
+            for doc in deduplicated_documents:
+                if doc.metadata["type"] == "image":  # 跨模态
+                    image_docs.append(doc)
+                elif doc.metadata["type"] == "text":  # 深度
+                    text_docs.append(doc)
 
         # 批量加入store中
         if text_docs:
@@ -330,6 +333,9 @@ class MultimodalVectorStore(BaseVectorStore):
     ) -> List[SearchResult]:
         """从指定存储检索"""
         try:
+            if not filter_dict:
+                filter_dict = None
+
             docs_with_scores = store.similarity_search_with_score(
                 query,
                 k=top_k,
@@ -344,7 +350,7 @@ class MultimodalVectorStore(BaseVectorStore):
                 ) for document, score in docs_with_scores
             ]
         except Exception as e:
-            logger.error(f"❌️MultimodalVectorStore查询'{store}'失败，{e}")
+            logger.error(f"❌️MultimodalVectorStore查询'{store.__str__()}'失败，{e}")
             return []
 
     def _clean_metadata(self, documents: list[Document]) -> list[Document]:
@@ -504,7 +510,8 @@ class MultimodalVectorStore(BaseVectorStore):
         # 图片嵌入
         if embedding_config.use_clip and embedding_config.clip_embedding_model:
             try:
-                self.image_embedding = CLIPEmbeddings(model_name=embedding_config.clip_embedding_model, batch_size=embedding_config.batch_size)
+                self.image_embedding = CLIPEmbeddings(model_name=embedding_config.clip_embedding_model,
+                                                      batch_size=embedding_config.batch_size)
                 self._has_clip = True
                 logger.info(f"✅️clip_embedding 初始化成功 模型：{embedding_config.clip_embedding_model}")
             except Exception as e:

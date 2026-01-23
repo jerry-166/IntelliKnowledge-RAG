@@ -5,15 +5,13 @@
 """
 import hashlib
 import logging
-import math
 import pickle
 import re
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-
 from langchain_core.documents import Document
+from python_services.core.search_results import KeywordSearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -29,24 +27,13 @@ logger = logging.getLogger(__name__)
 """
 
 
-@dataclass
-class KeywordSearchResult:
-    """
-    检索结果
-    """
-    document: Document
-    score: float = 0.0
-    matched_terms: list[str] = field(default_factory=list)  # 存储匹配到的词
-    rank: int = 0
-
-
 class BaseKeywordRetriever(ABC):
     """
     基础检索器
     """
 
     @abstractmethod
-    def add_documents(self, documents: list[Document]):
+    def add_documents(self, documents: list[Document]) -> list[str]:
         """添加文档"""
         pass
 
@@ -84,7 +71,7 @@ class ChineseTokenizer:
                 import jieba
                 self.jieba = jieba
                 # 启用paddle模式获得更好的分词效果（可选）
-                self.jieba.enable_paddle()
+                # self.jieba.enable_paddle()
             except ImportError:
                 logger.warning("jieba未安装，使用简单分词")
                 self.tokenizer_type = "simple"
@@ -174,10 +161,11 @@ class BM25Retriever(BaseKeywordRetriever):
         if self.persist_path and Path(self.persist_path).exists():
             self._load_index()
 
-    def add_documents(self, documents: list[Document]):
+    def add_documents(self, documents: list[Document]) -> list[str]:
         if not documents:
-            return
+            return []
 
+        doc_ids = []
         for doc in documents:
             doc_id = self._generate_doc_id(doc)
 
@@ -212,11 +200,13 @@ class BM25Retriever(BaseKeywordRetriever):
             if self.doc_lengths:
                 self.avgdl = sum(self.doc_lengths) / len(self.doc_lengths)
 
-            # 持久化
-            if self.persist_path:
-                self._save_index()
-
+            doc_ids.append(doc_id)
             logger.info(f"✅ BM25索引更新完成，共{len(self.documents)}个文档")
+
+        # 持久化
+        if self.persist_path:
+            self._save_index()
+        return doc_ids
 
     def search(self, query: str, top_k: int = 5) -> list[KeywordSearchResult]:
         # 非空判断
@@ -324,6 +314,9 @@ class BM25Retriever(BaseKeywordRetriever):
     def _save_index(self):
         if not self.persist_path:
             return
+        # 确保路径的父目录存在
+        persist_path = Path(self.persist_path)
+        persist_path.parent.mkdir(parents=True, exist_ok=True)
 
         data = {
             "documents": self.documents,
@@ -335,8 +328,22 @@ class BM25Retriever(BaseKeywordRetriever):
             "doc_freqs": self.doc_freqs,
         }
 
-        with open(self.persist_path, "wb") as f:
-            pickle.dump(data, f)
+        # 使用临时文件然后原子性地移动，避免写入过程中出现问题
+        temp_path = persist_path.with_suffix(persist_path.suffix + '.tmp')
+        try:
+            with open(temp_path, "wb") as f:
+                pickle.dump(data, f)
+            # 原子性地替换原文件
+            import os
+            if persist_path.exists():
+                os.remove(persist_path)
+            os.rename(temp_path, persist_path)
+        except Exception as e:
+            # 清理临时文件
+            if temp_path.exists():
+                temp_path.unlink()
+            # 重新抛出异常
+            raise e
 
     def _generate_doc_id(self, doc: Document) -> str:
         """生成文档ID"""
@@ -417,11 +424,12 @@ class ElasticSearchRetriever(BaseKeywordRetriever):
             mapping["mappings"]["properties"]["content"]["analyzer"] = "standard"
             self.es.indices.create(index=self.index_name, body=mapping)
 
-    def add_documents(self, documents: list[Document]):
+    def add_documents(self, documents: list[Document]) -> list[str]:
         """批量添加文档"""
         from elasticsearch.helpers import bulk
 
         actions = []
+        doc_ids = []
         for doc in documents:
             doc_id = hashlib.md5(doc.page_content.encode()).hexdigest()
             actions.append({
@@ -433,10 +441,12 @@ class ElasticSearchRetriever(BaseKeywordRetriever):
                     "doc_id": doc_id,
                 }
             })
+            doc_ids.append(doc_id)
 
         bulk(self.es, actions)
         self.es.indices.refresh(index=self.index_name)
         logger.info(f"✅ ES索引更新完成，添加{len(documents)}个文档")
+        return doc_ids
 
     def search(self, query: str, top_k: int = 5) -> list[KeywordSearchResult]:
         """es检索"""
@@ -450,8 +460,8 @@ class ElasticSearchRetriever(BaseKeywordRetriever):
             },
             "size": top_k,
             "highlight": {
-                "field": {
-                    "content": {}
+                "fields": {
+                    "field_name": {}
                 }
             }
         }

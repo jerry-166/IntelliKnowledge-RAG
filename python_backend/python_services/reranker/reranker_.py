@@ -4,7 +4,7 @@
 import logging
 from typing import Optional
 from langchain_core.documents import Document
-from python_backend.python_services.core.search_results import SearchResult
+from python_services.core.search_results import SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ class Reranker:
             logger.error(f"❌️Cross-Encoder排序器初始化失败: {e}")
             self.model = None
 
-    def rerank(self, query: str, results: list[SearchResult], top_k: Optional[int] = None) -> list[SearchResult]:
+    def rerank(self, query: str, results: list, top_k: Optional[int] = None) -> list[SearchResult]:
         """重排"""
         # 若模型未初始化成功，则返回原始文档
         if self.model is None:

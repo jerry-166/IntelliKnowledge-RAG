@@ -1,10 +1,11 @@
 """
 统一配置管理，支持多环境，热加载
 """
+import os
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal, Optional, List
+from typing import Literal, Optional, List, Dict, Any
 
 import yaml
 
@@ -64,11 +65,13 @@ class EmbeddingConfig:
 class VectorStoreConfig:
     """向量数据库配置"""
     provider: Literal["faiss", "milvus", "qdrant", "chroma"] = "chroma"
-    collection_name: str = "multimodal_docs"
-    persist_directory: str = "./vector_db"
     distance_metric: Literal["cosine", "ip", "l2"] = "cosine"
+    store_type: Literal["text", "image", "hybrid"] = "hybrid"
+    # chroma
+    collection_name: str = "multimodal_docs"
+    persist_directory: str = "./data/vector_db/chroma"
     # faiss的索引方式
-    faiss_persist_directory: str = "./vector_db/faiss"
+    faiss_persist_directory: str = "./data/vector_db/faiss"
     faiss_index_type: Literal["flat", "hnsw", "ivf"] = "Flat"
     faiss_image_index_type: Literal["flat", "hnsw", "ivf"] = "Flat"
     faiss_nlist: int = 100
@@ -103,10 +106,11 @@ class KeywordSearchConfig:
     # 停用词
     use_stopwords: bool = True
     custom_stopwords: List[str] = field(default_factory=list)
+    persist_path: str = "./data/keyword/bm25_index.pkl"
 
     # elasticsearch参数
     es_host: str = "localhost"
-    es_port: int = 9200
+    es_port: int = 9201
     es_index_name: str = "rag_documents"
 
     # es用户密码信息
@@ -121,7 +125,7 @@ class RetrieverConfig:
     hybrid_enabled: bool = True
     vector_weight: float = 0.6
     keyword_weight: float = 0.4
-    fusion_method: Literal["rrf", "weighted", "dbsf"] = "rrf"
+    fusion_method: Literal["rrf", "weighted", "dbsf"] = "rrf"  # 效果不好，感觉有reranker，不需要融合
     rrf_k: int = 60
 
 
@@ -149,11 +153,11 @@ class CacheConfig:
     # redis缓存
     redis_url: str = r"redis://localhost:6377/0?socket_timeout=5&retry_on_timeout=true"
     redis_prefix: str = "rag:"
-    faiss_persist_directory: str = "./cache/faiss"
+    faiss_persist_directory: str = "./data/cache/faiss"
     # embed
     embedding = r"C:\Users\ASUS\.cache\huggingface\hub\models--BAAI--bge-base-zh-v1.5\snapshots\f03589ceff5aac7111bd60cfc7d497ca17ecac65"
     # 磁盘缓存
-    cache_dir: str = "./cache/disk"
+    cache_dir: str = "./data/cache/disk"
 
 
 @dataclass
@@ -198,7 +202,7 @@ class RAGConfig:
     splitter: SplitterConfig = field(default_factory=SplitterConfig)
     vector_store: VectorStoreConfig = field(default_factory=VectorStoreConfig)
     keyword_search: KeywordSearchConfig = field(default_factory=KeywordSearchConfig)
-    # retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
+    retriever: RetrieverConfig = field(default_factory=RetrieverConfig)
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     reranker: RerankerConfig = field(default_factory=RerankerConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
@@ -219,16 +223,75 @@ class RAGConfig:
             splitter=SplitterConfig(**data.get("splitter", {})),
             vector_store=VectorStoreConfig(**data.get("vector_store", {})),
             keyword_search=KeywordSearchConfig(**data.get("keyword_search", {})),
-            # retriever=RetrieverConfig(**data.get("retriever", {})),
+            retriever=RetrieverConfig(**data.get("retriever", {})),
             embedding=EmbeddingConfig(**data.get("embedding", {})),
             reranker=RerankerConfig(**data.get("reranker", {})),
             cache=CacheConfig(**data.get("cache", {})),
         )
 
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "parser": self._obj_to_dict(self.parser),
+            "splitter": self._obj_to_dict(self.splitter),
+            "vector_store": self._obj_to_dict(self.vector_store),
+            "keyword_search": self._obj_to_dict(self.keyword_search),
+            "retriever": self._obj_to_dict(self.retriever),
+            "embedding": self._obj_to_dict(self.embedding),
+            "reranker": self._obj_to_dict(self.reranker),
+            "cache": self._obj_to_dict(self.cache),
+        }
 
-@lru_cache()
+    def _obj_to_dict(self, obj):
+        """递归转化对象为字典"""
+        if hasattr(obj, '__dict__') or hasattr(obj, '_asdict'):
+            # 如果是数据类实例
+            if hasattr(obj, '__dataclass_fields__'):
+                result = {}
+                for field_name in obj.__dataclass_fields__:
+                    value = getattr(obj, field_name)
+                    result[field_name] = self._obj_to_dict(value)
+                return result
+            else:
+                try:
+                    return {k: v for k, v in obj.__dict__.items()}
+                except:
+                    return str(obj)
+        elif isinstance(obj, (list, tuple)):
+            return [self._obj_to_dict(item) for item in obj]
+        elif isinstance(obj, dict):
+            return {k: self._obj_to_dict(v) for k, v in obj.items()}
+        else:
+            return obj
+
+    @classmethod
+    def save_to_yaml(cls, config: "RAGConfig", file_path: str = "../config.yaml"):
+        """将配置信息保存到本地yaml文件中"""
+        import os
+        directory = os.path.dirname(file_path)
+        if directory and not os.path.exists(directory):
+            os.makedirs(directory, exist_ok=True)
+
+        config_dict = config.to_dict()
+
+        with open(file_path, "w", encoding="utf-8") as f:
+            yaml.dump(config_dict, f, default_flow_style=False, allow_unicode=True, indent=2)
+
+        print(f"配置已保存到 {file_path}")
+
+    @classmethod
+    def save_to_sql(cls):
+        """将配置信息保存到数据库里"""
+        pass
+
+
+@lru_cache(maxsize=1)
 def get_config(config_path: Optional[str] = None) -> "RAGConfig":
     """获取配置单例"""
     if config_path and Path(config_path).exists():
         return RAGConfig.from_yaml(config_path)
     return RAGConfig()
+
+
+def refresh_config():
+    """刷新配置缓存"""
+    get_config.cache_clear()

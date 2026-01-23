@@ -7,16 +7,13 @@ todo: 检查循环逻辑正确与否，是否有重复处理page中的图片操�
 """
 import base64
 import datetime
-import io
-import time
+import os
 from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
 from typing import Dict, Any, List
+from zoneinfo import ZoneInfo
 
 import fitz
-from PIL import Image
-from zoneinfo import ZoneInfo
 from langchain_core.documents import Document
 
 from basic_core.llm_factory import qwen_vision
@@ -170,7 +167,7 @@ class PDFParser(BaseParser):
 
                     elements.append(
                         PDFElement(
-                            type=ElementType.TEXT,
+                            type=ElementType.TEXT if not is_header else ElementType.HEADER,
                             content=text_content.strip(),
                             page_num=page_num,
                             bbox=tuple(block["bbox"]),
@@ -388,6 +385,12 @@ class PDFParser(BaseParser):
         documents = []
         file_name = Path(file_path).name
 
+        file_name0 = file_name.split(".")[0]
+        output_dir = f".\output_image\\{file_name0}"
+        os.makedirs(output_dir, exist_ok=True)
+        output_md = f".\output\\{file_name0}"
+        os.makedirs(output_md, exist_ok=True)
+        md_lines = []
         # 按页进行document创建
         for page_num in sorted(page_elements_map.keys()):
             elements = page_elements_map[page_num]
@@ -406,6 +409,24 @@ class PDFParser(BaseParser):
                     image_parts.append(element)
                 else:
                     text_parts.append(element)
+
+            # 提取并保存md
+            inserted_image = set()  # 记录已经加入的图片
+            for ele in sorted_elements:
+                type = ele.type
+                content = ele.content
+                if type == ElementType.HEADER:
+                    md_lines.append(f"# {content}\n")
+                elif type == ElementType.IMAGE:
+                    # 下载到本地，并保证不会重复
+                    img_path = os.path.join(output_dir, f"page{page_num}_img{ele.metadata['image_index']}.png")
+                    if img_path not in inserted_image:
+                        with open(img_path, "wb") as f:
+                            f.write(base64.b64decode(ele.metadata["base64"]))
+                        inserted_image.add(img_path)
+                        md_lines.append(f"![Image]({img_path})\n")
+                else:
+                    md_lines.append(content + "\n")
 
             # 创建页面文本的Document
             page_contents: List[str] = []
@@ -455,13 +476,17 @@ class PDFParser(BaseParser):
                         }
                     ))
 
+        # 保存到md中
+        with open(os.path.join(output_md, "output.md"), "w", encoding="utf-8") as f:
+            f.write("\n".join(md_lines))
+        print(f"处理pdf文档{file_name}，保存图片到{output_dir}，保存处理后的md文档到{output_md}")
         return documents
 
 
 if __name__ == '__main__':
-    file0 = "C:/Users/ASUS/OneDrive/OneDrive 入门.pdf"
+    file0 = r"C:\Users\ASUS\Desktop\IntelliKnowledge-RAG\python_backend\a_other_rag\unstructured_fitz_multi\MCP实战课件【合集】.pdf"
     file1 = "C:/Users/ASUS/Desktop/IntelliKnowledge-RAG/docs/ceshi-pdf.pdf"
-    pdf_parser = PDFParser(vision_llm=qwen_vision)
+    pdf_parser = PDFParser()  # vision_llm=qwen_vision
     documents = pdf_parser.parse(file1)
 
     print(f"共解析出 {len(documents)} 个文档块")
