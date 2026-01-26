@@ -143,6 +143,11 @@ def create_conversation(data: dict):
     return new_conv
 
 
+def delete_message(conv_id: str):
+    global mock_messages
+    mock_messages = [msg for msg in mock_messages if msg.conversation_id != conv_id]
+
+
 # 删除对话
 @router.delete("/conversations/{conv_id}")
 def delete_conversation(conv_id: str):
@@ -151,12 +156,21 @@ def delete_conversation(conv_id: str):
     mock_conversations = [conv for conv in mock_conversations if conv.id != conv_id]
 
     # 删除关联的消息
-    global mock_messages
-    mock_messages = [msg for msg in mock_messages if msg.conversation_id != conv_id]
-
+    delete_message(conv_id)
     return {
         "success": True,
         "message": "对话删除成功"
+    }
+
+
+# 清空会话
+@router.post("/clear")
+def clear_conversation(conv_id: str):
+    """清空会话"""
+    delete_message(conv_id)
+    return {
+        "success": True,
+        "message": "会话清空成功"
     }
 
 

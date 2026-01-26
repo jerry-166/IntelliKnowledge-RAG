@@ -5,7 +5,9 @@ todo: 表格、链接怎么换回去，可以记录位置吗？
 todo: Markdown格式保留处理？标题、正文...
 """
 import datetime
+import os
 import re
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -14,7 +16,6 @@ from zoneinfo import ZoneInfo
 
 from langchain_community.document_loaders import UnstructuredMarkdownLoader
 from langchain_core.documents import Document
-
 from basic_core.llm_factory import qwen_vision
 from python_services.core.parser_element_type import ElementType
 from python_services.parsers.base_parser import BaseParser
@@ -41,14 +42,10 @@ class MultimodalMarkdownParser(BaseParser):
     def __init__(
             self,
             vision_llm=None,
-            use_ocr: bool = True,
-            use_vision: bool = False,
             max_workers: int = 4
     ):
         super().__init__("Markdown解析器", ["md"], max_workers)
         self.vision_llm = vision_llm
-        self.use_ocr = use_ocr
-        self.use_vision = use_vision
         # 存储图片uuid和图片内容的映射关系
         self.image_mapping: dict = {}
 
@@ -61,93 +58,137 @@ class MultimodalMarkdownParser(BaseParser):
         if not file_path.exists():
             raise FileNotFoundError(f"文件不存在: {file_path}")
 
-        # 使用langchain的Markdown加载器读取Markdown文件
-        loader = UnstructuredMarkdownLoader(file_path)
-        docs = loader.load()
-        if len(docs) == 0:
-            return []
-        raw_text_with_uuid = docs[0].page_content
-
-        # 使用file-open获取图片Document、todo：表格、链接
+        # 直接读取原始内容
         with open(file_path, 'r', encoding='utf-8') as f:
             original_content = f.read()
-        base_dir = file_path.parent
-        image_elements = self._extract_image_elements(original_content, base_dir)
 
-        # 建立图片映射关系（uuid---image）
-        self._build_image_mapping(image_elements)
+        # 提取所有元素
+        image_elements = self._extract_image_elements(original_content, file_path)
 
-        # 将图片信息映射到原始文本中
-        final_text = self._replace_uuid_with_image_content(raw_text_with_uuid)
+        # 清理并处理原始内容：保留结构，去除多余空白符号
+        cleaned_content = self._clean_markdown_content(original_content, image_elements)
+
         # 构建文本的Document
         text_document = Document(
-            page_content=final_text,
+            page_content=cleaned_content,
             metadata={
                 "source": str(file_path),
                 "type": "text",
                 "file_name": file_path.name,
                 "ext": "md",
-                'create_time': datetime.datetime.now(ZoneInfo("Asia/Shanghai")).isoformat()
-                # "total_images": len(image_elements),
-                # "text_len": len(final_text),
+                'create_time': datetime.datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(),
+                "total_images": len(image_elements)
             }
         )
         documents.append(text_document)
 
         # 构建图片的Document
-        image_documents = self._build_image_documents(image_elements, base_dir)
+        image_documents = self._build_image_documents(image_elements)
         documents.extend(image_documents)
 
+        # 下载原来的Md文件
+        path = Path("./output") / f"{Path(file_path_or_url).stem}" / "original.md"
+        if not path.exists():
+            os.makedirs(path.parent, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(original_content)  # 保存原本的内容（通过读取）
+        # 下载加强的Md文件
+        path = Path("./output") / f"{Path(file_path_or_url).stem}" / "augment.md"
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(cleaned_content)  # 保存清理后的内容
         return documents
 
-    def _extract_image_elements(self, original_content: str, base_dir: Path) -> list[MarkdownElement]:
+    def _clean_markdown_content(self, content: str, image_elements: list[MarkdownElement]) -> str:
+        """清理Markdown内容：保留结构，去除多余空白符号
+        
+        Args:
+            content: 原始Markdown内容
+            image_elements: 提取到的图片元素列表
+            
+        Returns:
+            清理后的Markdown内容
+        """
+
+        # 1. 处理图片：将图片替换为OCR/视觉模型内容
+        def replace_image(match):
+            alt_text = match.group(1)
+            img_path = match.group(2)
+            # 查找对应的图片元素
+            for img_ele in image_elements:
+                if img_ele.metadata['source'] == img_path:
+                    return f"\n【图片内容】：\n{img_ele.content}\n【图片路径】：{img_path}\n"
+            return match.group(0)  # 如果没找到，保留原样
+
+        content = re.sub(self.PATTERNS['image'], replace_image, content)
+
+        # 2. 清理多余的空白符号
+        lines = []
+        for line in content.split('\n'):
+            # 去除行首行尾的空白
+            cleaned_line = line.strip()
+            # 去除行内多余的空格和tab（连续的空白替换为单个空格）
+            cleaned_line = re.sub(r"\s+", ' ', cleaned_line)
+            # 保留表格、标题、链接的结构
+            lines.append(cleaned_line)
+
+        # 3. 合并连续的空行（最多保留一个空行）
+        cleaned_content = ''
+        prev_empty = False
+        for line in lines:
+            if not line:
+                if not prev_empty:
+                    cleaned_content += '\n'
+                    prev_empty = True
+            else:
+                cleaned_content += line + '\n'
+                prev_empty = False
+
+        return cleaned_content.strip()
+
+    def _extract_image_elements(self, original_content: str, path: Path) -> list[MarkdownElement]:
         """提取Markdown中的图片信息"""
         image_elements = []
 
         for match in re.finditer(self.PATTERNS['image'], original_content):
             alt_text, image_url = match.groups()
             # 处理图片
-            image_element = self._process_image(alt_text, image_url, base_dir)
+            image_element = self._process_image(alt_text, image_url, path)
             if image_element:
                 image_elements.append(image_element)
 
         return image_elements
 
-    def _process_image(self, alt_text: str, img_path: str, base_dir: Path) -> MarkdownElement | None:
+    def _process_image(self, alt_text: str, img_path: str, path: Path) -> MarkdownElement | None:
         """处理图片：OCR / 视觉模型识别"""
-
         try:
-            image = ImageUtil.load_image(img_path, base_dir)
+            image = ImageUtil.load_image(img_path, path.parent)
             if not image:
                 print(f"图片加载失败，返回None")
                 return None
-
-            content = ""
-            process_type = ""
-
             # 视觉模型/OCR识别
-            if self.use_vision and self.vision_llm:
-                content = OcrUtil.vision_ocr(vision_llm=self.vision_llm, image=image)
-                if content:  # 只有在成功获取内容时才设置process_type
-                    process_type = self.vision_llm.model_name
-                else:
-                    print("视觉LLM识别失败，尝试回退到Tesseract OCR")
-                    # 回退到Tesseract OCR
-                    if self.use_ocr:
-                        content = OcrUtil.tesseract_ocr(image=image)
-                        if content:
-                            process_type = "tesseracts OCR"
-            elif self.use_ocr:
-                content = OcrUtil.tesseract_ocr(image=image)
-                process_type = "tesseracts OCR"
-            else:
-                return None
-
+            img_bytes = ImageUtil.image_to_bytes(image=image)[0]
+            content = OcrUtil.describe_image(img_bytes, self.vision_llm)
             # 如果所有方法都失败了
             if not content:
                 print(f"所有OCR方法都失败了，返回None")
                 return None
+            # 处理图片内容(防止代码注释的‘#’变成md的标题格式)
+            # 在行首的 # 前添加点，防止被识别为Markdown标题
+            content = re.sub(r'^(#+)', r'\1.', content, flags=re.MULTILINE)
 
+            # 保存图片到本地
+            try:
+                save_dir = Path("./output") / f"{path.stem}" / "images"
+                # 创建目录（exist_ok=True确保目录存在）
+                save_dir.mkdir(parents=True, exist_ok=True)
+                # 生成唯一文件名
+                save_path = save_dir / f"{path.stem}_{uuid.uuid4()}.png"
+                # 保存图片
+                with open(save_path, 'wb') as f:
+                    f.write(img_bytes)
+                print(f"图片已保存到: {save_path}")
+            except Exception as save_e:
+                print(f"保存图片失败: {save_e}")
         except Exception as e:
             print(f"处理图片失败 {img_path}: {e}")
             return None
@@ -157,55 +198,56 @@ class MultimodalMarkdownParser(BaseParser):
             type=ElementType.IMAGE,
             content=content,
             metadata={
+                'type': 'image',
                 'source': img_path,
                 'alt_text': alt_text,
                 # 'raw': f"![{alt_text}]({img_path})",
                 # 'base_dir': str(base_dir),
-                'ocr_': process_type,
                 'ext': "md",
             }
         )
         return element
 
-    def _build_image_mapping(self, image_elements: list[MarkdownElement]):
-        """
-        构建图片映射：
-        - Key：Loader生成的UUID(与读取的是匹配的)
-        - Value：图片OCR/视觉模型内容 + 元数据
-        """
-        for image_element in image_elements:
-            self.image_mapping[image_element.metadata['alt_text']] = {
-                'content': image_element.content,
-                'metadata': image_element.metadata
-            }
+    """
+        def _build_image_mapping(self, image_elements: list[MarkdownElement]):
+            构建图片映射：
+            - Key：Loader生成的UUID(与读取的是匹配的)
+            - Value：图片OCR/视觉模型内容 + 元数据
+            
+            for image_element in image_elements:
+                self.image_mapping[image_element.metadata['alt_text']] = {
+                    'content': image_element.content,
+                    'metadata': image_element.metadata
+                }
+        
+        def _replace_uuid_with_image_content(self, raw_text_with_uuid: str) -> str:
+            # 替换LangChain Loader文本中的图片UUID为OCR/视觉模型内容
+            # 匹配Loader生成的图片UUID占位符（格式：xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx）
+            uuid_pattern = r'([0-9a-f\-]{36})'
+    
+            # 替换uuid的方法
+            def replace_uuid(match):
+                uuid_str = match.group(1)
+                # 精准匹配UUID
+                if self.image_mapping:
+                    dict_ = self.image_mapping[uuid_str]
+                    img_content = dict_.get('content')
+                    img_path = dict_.get('metadata')['source']
+                    return f"【图片内容】：\n{img_content}\n{img_path}"  # 明确标记图片语义
+                return f"【图片解析失败】：UUID_{uuid_str}"
+    
+            final_text = re.sub(uuid_pattern, replace_uuid, raw_text_with_uuid)
+            return final_text
+    """
 
-    def _replace_uuid_with_image_content(self, raw_text_with_uuid: str) -> str:
-        """替换LangChain Loader文本中的图片UUID为OCR/视觉模型内容"""
-        # 匹配Loader生成的图片UUID占位符（格式：xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx）
-        uuid_pattern = r'([0-9a-f\-]{36})'
-
-        # 替换uuid的方法
-        def replace_uuid(match):
-            uuid_str = match.group(1)
-            # 精准匹配UUID
-            if self.image_mapping:
-                dict_ = self.image_mapping[uuid_str]
-                img_content = dict_.get('content')
-                img_path = dict_.get('metadata')['source']
-                return f"【图片内容】：\n{img_content}\n{img_path}"  # 明确标记图片语义
-            return f"【图片解析失败】：UUID_{uuid_str}"
-
-        final_text = re.sub(uuid_pattern, replace_uuid, raw_text_with_uuid)
-        return final_text
-
-    def _build_image_documents(self, image_elements: list[MarkdownElement], base_dir:  Path) -> list[Document]:
+    def _build_image_documents(self, image_elements: list[MarkdownElement]) -> list[Document]:
         """构建images的Document列表"""
         image_documents = []
         for image_element in image_elements:
             image_document = Document(
                 page_content=image_element.content,
                 metadata={
-                    "type": "image",
+                    # "type": "image",
                     **image_element.metadata,
                     "create_time": datetime.datetime.now(ZoneInfo("Asia/Shanghai")).isoformat()
                 }
@@ -217,7 +259,7 @@ class MultimodalMarkdownParser(BaseParser):
 
 if __name__ == '__main__':
     # 初始化解析器
-    parser = MultimodalMarkdownParser(vision_llm=qwen_vision, use_ocr=True, use_vision=True)
+    parser = MultimodalMarkdownParser()  # vision_llm=qwen_vision)
 
     # 解析文件：返回Document列表
     documents = parser.parse(r"C:\Users\ASUS\Desktop\makedown\deepAgent.md")

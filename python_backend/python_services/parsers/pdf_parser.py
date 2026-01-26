@@ -1,9 +1,9 @@
 """
 pdf解析器（实现parser基类）
-todo: 普通的pdf对于视觉模型和ocr的选择
-todo: 处理的图片大小
+ok: 普通的pdf对于视觉模型和ocr的选择 --- 优先使用视觉模型
+ok: 处理的图片大小 --- 没办法全考虑，只对小的图标跳过
 todo: metadata的处理（page等...）
-todo: 检查循环逻辑正确与否，是否有重复处理page中的图片操作
+ok: 检查循环逻辑正确与否，是否有重复处理page中的图片操作 --- 没有吧，可能是一个是去构建md，一个去存图片向量库了
 """
 import base64
 import datetime
@@ -15,10 +15,9 @@ from zoneinfo import ZoneInfo
 
 import fitz
 from langchain_core.documents import Document
-
-from basic_core.llm_factory import qwen_vision
 from python_services.core.parser_element_type import ElementType
 from python_services.parsers.base_parser import BaseParser
+from python_services.utils.image_util import ImageUtil
 from python_services.utils.ocr_util import OcrUtil
 
 
@@ -57,6 +56,59 @@ class PDFParser(BaseParser):
         self.extract_tables = extract_tables
         self.min_image_size = min_image_size
 
+    def _save_page_image(self, page, path: str):
+        """保存每一页图片"""
+        # 确保目录存在
+        dir_path = Path(path).parent
+        dir_path.mkdir(parents=True, exist_ok=True)
+
+        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+        bytes = pix.tobytes()
+        with open(path, "wb") as f:
+            f.write(bytes)
+
+    def _save_visualized_page_image(self, page, path: str, elements: List[PDFElement]):
+        """保存带有元素边框的可视化页面图片"""
+        # 创建一个临时PDF文档用于绘制
+        temp_doc = fitz.open()
+        draw_page = temp_doc.new_page(width=page.rect.width, height=page.rect.height)
+
+        # 复制原页面内容
+        mat = fitz.Matrix(1, 1)  # 单位矩阵，不缩放
+        pix = page.get_pixmap(matrix=mat)
+        draw_page.insert_image(
+            fitz.Rect(0, 0, draw_page.rect.width, draw_page.rect.height),
+            pixmap=pix
+        )
+
+        # 为每个元素绘制边框
+        for element in elements:
+            # 根据元素类型设置不同的边框样式
+            border_color = (0, 0, 0)  # 默认黑色
+            border_width = 1.0
+
+            # 不同类型元素使用不同颜色
+            if element.type == ElementType.TEXT:
+                border_color = (0, 0, 1)  # 蓝色 - 普通文本
+            elif element.type == ElementType.HEADER:
+                border_color = (1, 0, 0)  # 红色 - 标题
+            elif element.type == ElementType.IMAGE:
+                border_color = (0, 1, 0)  # 绿色 - 图片
+            elif element.type == ElementType.TABLE:
+                border_color = (1, 0, 1)  # 紫色 - 表格
+            elif element.type == ElementType.LINK:
+                border_color = (1, 0.5, 0)  # 橙色 - 链接
+
+            # 绘制边框
+            rect = fitz.Rect(*element.bbox)
+            draw_page.draw_rect(rect, color=border_color, width=border_width)
+
+        # 生成带有边框的图片
+        self._save_page_image(draw_page, path)
+
+        # 关闭临时文档
+        temp_doc.close()
+
     def parse_impl(self, file_path_or_url: str, is_scanned: bool = False) -> List[Document]:
         """
         解析pdf文件，返回langchain的Document列表
@@ -83,31 +135,47 @@ class PDFParser(BaseParser):
                     page_elements.append(scanned_page_elements)
             else:
                 # 普通页面：结构化提取
-                # 1. 提取文本块
-                text_elements = self._extract_texts(page, page_num)
+                # 1. 先提取表格，用于后续排除表格区域的文本提取
+                table_elements = []
+                excluded_areas = []
+                if self.extract_tables:
+                    table_elements = self._extract_tables(page, page_num)
+                    if table_elements:
+                        print(f"提取PDF表格成功")
+                        # 收集表格边界框，用于排除文本提取
+                        excluded_areas = [table.bbox for table in table_elements]
+
+                # 2. 提取文本块，排除表格区域
+                text_elements = self._extract_texts(page, page_num, excluded_areas)
                 if text_elements:
                     print(f"提取PDF文本成功")
                     page_elements.extend(text_elements)
 
-                # 2. 提取图片
+                # 3. 添加表格元素
+                if table_elements:
+                    page_elements.extend(table_elements)
+
+                # 4. 提取图片
                 if self.extract_images:
                     image_elements = self._extract_images(page, page_num, docs)
                     if image_elements:
                         print(f"提取PDF图片成功")
                         page_elements.extend(image_elements)
 
-                # 3. 提取表格
-                if self.extract_tables:
-                    table_elements = self._extract_tables(page, page_num)
-                    if table_elements:
-                        print(f"提取PDF表格成功")
-                        page_elements.extend(table_elements)
-
-                # 4. 提取链接
+                # 5. 提取链接
                 link_elements = self._extract_links(page, page_num)
                 if link_elements:
                     print(f"提取PDF链接成功")
                     page_elements.extend(link_elements)
+
+            # 保存每页原始图片
+            original_path = Path("./output") / pdf_path.stem / "image" / "original" / f"{page_num}.png"
+            self._save_page_image(page, str(original_path))
+
+            # 保存带有元素边框的可视化页面图片
+            if page_elements:  # 只对有提取元素的页面生成可视化
+                augment_path = Path("./output") / pdf_path.stem / "image" / "augment" / f"{page_num}.png"
+                self._save_visualized_page_image(page, str(augment_path), page_elements)
 
             page_elements_map[page_num] = page_elements
 
@@ -129,7 +197,7 @@ class PDFParser(BaseParser):
             img_bytes = pix.tobytes("png")
             if self.vision_llm:
                 # 既需要提取图片，也传入了视觉LLM，则使用视觉LLM进行描述
-                ocr_result = OcrUtil.vision_ocr(self.vision_llm, img_bytes, 'png')
+                ocr_result = OcrUtil.vision_ocr(self.vision_llm, img_bytes)
                 ocr_method = self.vision_llm.model_name
             elif not self.vision_llm:
                 # 没有视觉LLM，判断是否有tesseract_ocr
@@ -138,23 +206,38 @@ class PDFParser(BaseParser):
                     ocr_method = "tesseract_ocr"
 
         return PDFElement(
-                type=ElementType.IMAGE,
-                content=ocr_result.strip(),
-                page_num=page_num,
-                bbox=(0, 0, page.rect.width, page.rect.height),
-                metadata={
-                    "source": "ocr_page",
-                    "method": ocr_method,
-                }
-            )
+            type=ElementType.IMAGE,
+            content=ocr_result.strip(),
+            page_num=page_num,
+            bbox=(0, 0, page.rect.width, page.rect.height),
+            metadata={
+                "source": "ocr_page",
+                "method": ocr_method,
+            }
+        )
 
-    def _extract_texts(self, page, page_num: int) -> List[PDFElement]:
-        """提取文本，保持结构"""
+    def _extract_texts(self, page, page_num: int, excluded_areas: List[tuple] = None) -> List[PDFElement]:
+        """提取文本，保持结构，排除指定区域"""
+        if excluded_areas is None:
+            excluded_areas = []
+
         elements = []
 
         blocks = page.get_text("dict")["blocks"]
         for block in blocks:
             if block["type"] == 0:  # 文本块
+                # 检查文本块是否与排除区域重叠
+                block_bbox = block["bbox"]
+                should_exclude = False
+
+                for excl_bbox in excluded_areas:
+                    if self._check_overlap(block_bbox, excl_bbox):
+                        should_exclude = True
+                        break
+
+                if should_exclude:
+                    continue
+
                 text_content = ""
                 for line in block.get("lines", []):
                     for span in line.get("spans", []):
@@ -184,7 +267,6 @@ class PDFParser(BaseParser):
     def _extract_images(self, page, page_num: int, doc) -> List[PDFElement]:
         """提取图片"""
         elements = []
-
         image_list = page.get_images()
 
         for img_index, img in enumerate(image_list):
@@ -201,26 +283,18 @@ class PDFParser(BaseParser):
                 # 获取图片位置
                 bbox = self._get_image_bbox(page, xref)
 
-                # 视觉LLM，提取图片描述 todo:ocr OR 视觉LLM
-                """
-                图片描述放在metadata中吗？如果检索不到该图片，那它的metadata不是就没用了?
-                ===> 放入content中便于检索
-                """
-                image_description = ""
-                if self.vision_llm:
-                    image_description = self._describe_image(image_bytes, base_image["ext"])
-                    if image_description:
-                        print(f"视觉模型处理pdf图片，获得图片描述：{image_description[:100]}")
+                # 视觉LLM，提取图片描述
+                image_description = OcrUtil.describe_image(image_bytes, self.vision_llm)
+                if image_description:
+                    print(f"视觉模型处理pdf图片，获得图片描述：{image_description[:100]}")
 
                 elements.append(
                     PDFElement(
                         type=ElementType.IMAGE,
-                        content=image_description,
+                        content=image_description or "",
                         page_num=page_num,
                         bbox=bbox,
                         metadata={
-                            # "width": pil_image.width,
-                            # "height": pil_image.height,
                             "format": base_image.get("ext", "unknown"),
                             "image_index": img_index,
                             "base64": base64.b64encode(image_bytes).decode()  # 用于在前端渲染图片
@@ -247,6 +321,7 @@ class PDFParser(BaseParser):
 
                 # 转化为markdown表格
                 markdown_table = self._table_to_markdown(table_data)
+                # 根据table_data的位置信息，删除text提取出的table
 
                 elements.append(
                     PDFElement(
@@ -308,35 +383,26 @@ class PDFParser(BaseParser):
 
         return max(sizes) if sizes else 12
 
-    def _describe_image(self, image_bytes: bytes, image_format: str = "png") -> str:
-        """使用视觉模型模数图片"""
-        if not self.vision_llm:
-            return ""
+    def _check_overlap(self, bbox1: tuple, bbox2: tuple, threshold: float = 0.5) -> bool:
+        """检查两个边界框是否重叠，超过阈值则认为重叠"""
+        x1_1, y1_1, x2_1, y2_1 = bbox1
+        x1_2, y1_2, x2_2, y2_2 = bbox2
 
-        try:
-            base64_image = base64.b64encode(image_bytes).decode()
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "请详细描述这张图片的内容，包含图表、图形、文字等所有信息。如果是图表，请提取其中的数据。不包含背景颜色，文字颜色，字体及大小等无关信息"
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/{image_format};base64,{base64_image}"
-                            }
-                        }
-                    ]
-                }
-            ]
-            response = self.vision_llm.invoke(messages)
-            return response.content
-        except Exception as e:
-            print(f"调用视觉模型描述图片失败：{e}")
-            return ""
+        # 计算交集面积
+        left = max(x1_1, x1_2)
+        top = max(y1_1, y1_2)  # 修复：使用正确的顶部坐标
+        right = min(x2_1, x2_2)
+        bottom = min(y2_1, y2_2)
+
+        if left < right and top < bottom:
+            intersection_area = (right - left) * (bottom - top)
+            bbox1_area = (x2_1 - x1_1) * (y2_1 - y1_1)
+
+            # 如果交集面积占原区域面积的比例超过阈值，则认为重叠
+            overlap_ratio = intersection_area / bbox1_area if bbox1_area > 0 else 0
+            return overlap_ratio >= threshold
+
+        return False
 
     def _get_image_bbox(self, page, xref: int) -> tuple:
         """获取图片的边界框"""
@@ -384,12 +450,13 @@ class PDFParser(BaseParser):
         """返回langchain的Document对象，以页为单位"""
         documents = []
         file_name = Path(file_path).name
+        file_stem = Path(file_path).stem  # 不带扩展名的文件名
 
-        file_name0 = file_name.split(".")[0]
-        output_dir = f".\output_image\\{file_name0}"
-        os.makedirs(output_dir, exist_ok=True)
-        output_md = f".\output\\{file_name0}"
-        os.makedirs(output_md, exist_ok=True)
+        output_dir = Path(".") / "output" / file_stem / "image"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_md = Path(".") / "output" / file_stem
+        output_md.mkdir(parents=True, exist_ok=True)
+
         md_lines = []
         # 按页进行document创建
         for page_num in sorted(page_elements_map.keys()):
@@ -423,8 +490,11 @@ class PDFParser(BaseParser):
                     if img_path not in inserted_image:
                         with open(img_path, "wb") as f:
                             f.write(base64.b64decode(ele.metadata["base64"]))
-                        inserted_image.add(img_path)
-                        md_lines.append(f"![Image]({img_path})\n")
+                            img_bytes = ImageUtil.base64_to_bytes(ele.metadata["base64"])
+                            inserted_image.add(img_path)
+                            md_lines.append(f"![Image]({img_path})\n")
+                            image_content = OcrUtil.describe_image(img_bytes, self.vision_llm)
+                        md_lines.append("." + image_content)  # 加入图片描述
                 else:
                     md_lines.append(content + "\n")
 

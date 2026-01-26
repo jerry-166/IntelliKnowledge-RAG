@@ -1,5 +1,5 @@
 """
-对普通的文本文件、代码文件等单一格式文件解析
+对普通的文本文件、代码文件等单一格式文件解析 --- 简单
 """
 from langchain_core.documents import Document
 from langchain_community.document_loaders import TextLoader

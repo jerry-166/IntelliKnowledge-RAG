@@ -7,6 +7,8 @@ import io
 from typing import Optional
 from PIL import Image
 
+from python_services.utils.image_util import ImageUtil
+
 # 静态方法与普通方法对比
 """
 特性      |    静态方法 @staticmethod   |   普通方法
@@ -47,7 +49,6 @@ class OcrUtil:
                 img_bytes, img_format = ImageUtil.image_to_bytes(image, format="JPEG", quality=90)
 
             base64_image = base64.b64encode(img_bytes).decode('utf-8')
-
             messages = [
                 {
                     "role": "user",
@@ -65,7 +66,6 @@ class OcrUtil:
                     ]
                 }
             ]
-
             response = vision_llm.invoke(messages)
             return response.content
 
@@ -98,4 +98,18 @@ class OcrUtil:
             return ""
         except Exception as e:
             print(f"pytesseract OCR失败: {e}")
+            return ""
+
+    @staticmethod
+    def describe_image(image_bytes: bytes, vision_llm: Optional[object]) -> str:
+        """使用视觉模型模数图片"""
+        image = ImageUtil.to_pil_image(image_bytes)
+        if not vision_llm:
+            # 使用OCR进行识别
+            return OcrUtil.tesseract_ocr(image)
+        try:
+            content = OcrUtil.vision_ocr(vision_llm, image=image)
+            return content
+        except Exception as e:
+            print(f"调用视觉模型描述图片失败：{e}")
             return ""

@@ -11,7 +11,7 @@ from typing import List
 
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter, MarkdownTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter, MarkdownHeaderTextSplitter
 from langchain_experimental.text_splitter import SemanticChunker
 
 from basic_core.llm_factory import qwen_vision
@@ -45,9 +45,12 @@ class IntegrationSplitter:
             breakpoint_threshold_amount=RAGConfig.splitter.breakpoint_threshold_amount,
         )
 
-        self.markdown_splitter = MarkdownTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
+        self.markdown_splitter = MarkdownHeaderTextSplitter(
+            headers_to_split_on=[
+                ('#', '一级标题'),
+                ('##', '二级标题'),
+                ('###', '三级标题'),
+            ],
         )
 
     def split_documents_(self, documents: List[Document], file_suffix: str = 'txt', ) -> List[Document]:
@@ -64,15 +67,13 @@ class IntegrationSplitter:
 
         # todo: 根据type类型选择不同的切分器，切分文本的Document
         if file_suffix == 'md':
-            splitter_md_documents = self.markdown_splitter.split_documents(text_docs)
-            docs.extend(splitter_md_documents)
+            for doc in text_docs:
+                splitter_md_documents = self.markdown_splitter.split_text(doc.page_content)
+                docs.extend(splitter_md_documents)
         elif file_suffix == 'txt':
             splitter_text_documents = self.text_splitter.split_documents(text_docs)
             docs.extend(splitter_text_documents)
-        elif file_suffix == 'pdf':
-            splitter_text_documents = self.text_splitter.split_documents(text_docs)
-            docs.extend(splitter_text_documents)
-        elif file_suffix in ['docx', 'pptx']:
+        elif file_suffix in ['docx']:
             splitter_text_documents = self.semantic_splitter.split_documents(text_docs)
             docs.extend(splitter_text_documents)
 
@@ -84,7 +85,7 @@ class IntegrationSplitter:
 if __name__ == '__main__':
     # 数据加载器
     loader = {
-        "md": MultimodalMarkdownParser(qwen_vision, use_vision=True),
+        "md": MultimodalMarkdownParser(qwen_vision),
         "pdf": PDFParser(qwen_vision),
         "docx": WordParser(),
         "pptx": PPtParser(),
@@ -109,6 +110,6 @@ if __name__ == '__main__':
     )
     file_path = r"C:\Users\ASUS\Desktop\makedown\deepAgent.md"
     documents = loader['md'].parse(file_path)
-    documents_split = splitter.split_documents_(documents, file_type='md')
+    documents_split = splitter.split_documents_(documents)
     print(len(documents_split))
     pass

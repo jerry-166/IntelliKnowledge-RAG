@@ -1,5 +1,5 @@
 """
-word的解析器
+word的解析器 --- 留作对比
 """
 from langchain_core.documents import Document
 
@@ -26,6 +26,6 @@ class WordParser(BaseParser):
 
 if __name__ == '__main__':
     parser = WordParser()
-    doc_path = r"C:\Users\ASUS\Desktop\word\test.docx"
+    doc_path = r"C:\Users\ASUS\Desktop\刘瑞杰简历.docx"
     docs = parser.parse(doc_path)
     print(docs)

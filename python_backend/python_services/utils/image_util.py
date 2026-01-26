@@ -154,3 +154,16 @@ class ImageUtil:
             return pil_img
         else:
             raise ValueError(f"不支持的输入类型：{type(image)}")
+
+    @staticmethod
+    def base64_to_bytes(base64_str: str):
+        if "," in base64_str:
+            base64_str = base64_str.split(",")[1]
+        byte_data = base64.b64decode(base64_str.encode('utf-8'))
+        return byte_data
+
+    @staticmethod
+    def base64_to_pil_image(base64_str: str):
+        bytes = ImageUtil.base64_to_bytes(base64_str)
+        image = Image.open(io.BytesIO(bytes))
+        return image

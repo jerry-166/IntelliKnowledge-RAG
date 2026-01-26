@@ -69,9 +69,9 @@ class VectorStoreConfig:
     store_type: Literal["text", "image", "hybrid"] = "hybrid"
     # chroma
     collection_name: str = "multimodal_docs"
-    persist_directory: str = "./data/vector_db/chroma"
+    persist_directory: str = "./output/data/vector_db/chroma"
     # faiss的索引方式
-    faiss_persist_directory: str = "./data/vector_db/faiss"
+    faiss_persist_directory: str = "./output/data/vector_db/faiss"
     faiss_index_type: Literal["flat", "hnsw", "ivf"] = "Flat"
     faiss_image_index_type: Literal["flat", "hnsw", "ivf"] = "Flat"
     faiss_nlist: int = 100
@@ -106,7 +106,7 @@ class KeywordSearchConfig:
     # 停用词
     use_stopwords: bool = True
     custom_stopwords: List[str] = field(default_factory=list)
-    persist_path: str = "./data/keyword/bm25_index.pkl"
+    persist_path: str = "./output/data/keyword/bm25_index.pkl"
 
     # elasticsearch参数
     es_host: str = "localhost"
@@ -171,7 +171,7 @@ class ParseConfig:
     min_image_size: int = 10
     max_image_size: int = 4096
     supported_formats: list = field(default_factory=lambda: [
-        "pdf", "docx", "pptx", "md", "txt", "html", "png", "jpg", "jpeg"
+        "pdf", "docx", "pptx", "md", "txt", "png", "jpg", "jpeg"
     ])
     # 并发配置
     max_workers: int = 10

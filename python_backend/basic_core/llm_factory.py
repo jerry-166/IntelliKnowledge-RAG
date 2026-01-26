@@ -157,5 +157,5 @@ class LLMFactory:
 
 
 if __name__ == '__main__':
-    invoke = qwen_vision_vllm.invoke("你好，你是谁？")
+    invoke = qwen_vision.invoke("你好，你是谁？")
     print(invoke)

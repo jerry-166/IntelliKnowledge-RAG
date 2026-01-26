@@ -260,9 +260,9 @@ class MultimodalVectorStore(BaseVectorStore):
             text_docs = documents
         else:  # 混合模式则是分开放
             for doc in deduplicated_documents:
-                if doc.metadata["type"] == "image":  # 跨模态
+                if doc.metadata.get('type', '') == "image":  # 跨模态
                     image_docs.append(doc)
-                elif doc.metadata["type"] == "text":  # 深度
+                elif doc.metadata.get('type', '') == "text":  # 深度
                     text_docs.append(doc)
 
         # 批量加入store中

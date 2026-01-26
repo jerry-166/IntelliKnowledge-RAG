@@ -16,55 +16,30 @@ from pathlib import Path
 
 
 class ImageParser(BaseParser):
-    def __init__(self, vision_llm=None, use_vision: bool = False, use_ocr: bool = True):
+    def __init__(self, vision_llm: Optional[object]=None):
         super().__init__("图片解析器", ["png", "jpg", "jpeg"])
         self.vision_llm = vision_llm
-        self.use_vision = use_vision
-        self.use_ocr = use_ocr
 
-    def parse_impl(self, file_path_or_url: str) -> Document | None:
+    def parse_impl(self, file_path_or_url: str) -> Document:
         """解析图片的主要函数"""
-        try:
-            # 使用OCR工具处理图片
-            image = ImageUtil.load_image(file_path_or_url, Path(os.path.dirname(file_path_or_url)))
-            if self.use_ocr and self.use_vision:
-                try:
-                    vision_content = OcrUtil.vision_ocr(vision_llm=self.vision_llm, image=image)
-                    vision_doc = Document(
-                        page_content=vision_content,
-                        metadata={
-                            "source": file_path_or_url,
-                            "type": "image",
-                            "ocr_": self.vision_llm.model_name
-                        }
-                    )
-                    print(f"使用视觉模型成功解析图片")
-                    return vision_doc
-                except Exception as e:
-                    print(f"视觉模型: {self.vision_llm.model_name} 解析失败: {e}")
-            elif self.use_ocr:
-                try:
-                    ocr_content = OcrUtil.tesseract_ocr(image)
-                    ocr_doc = Document(
-                        page_content=ocr_content,
-                        metadata={
-                            "source": file_path_or_url,
-                            "type": "image",
-                            "ocr_": "Tesseract OCR"
-                        }
-                    )
-                    print(f"使用Tesseract OCR成功解析图片")
-                    return ocr_doc
-                except Exception as e:
-                    print(f"Tesseract OCR解析失败: {e}")
-        except Exception as e:
-            print(f"图片处理过程中出现错误: {e}")
+        image = ImageUtil.load_image(file_path_or_url, Path(os.path.dirname(file_path_or_url)))
+        base64_str = ImageUtil.image_to_bytes(image)
+        res = ImageUtil.image_to_bytes(image=image)
+        content = OcrUtil.describe_image(vision_llm=self.vision_llm, image_bytes=res[0])
 
-        return None
+        document = Document(
+            page_content=content,
+            metadata={
+                "source": file_path_or_url,
+                "type": "image",
+                "base64": base64_str,
+            }
+        )
+        return document
 
 
 if __name__ == '__main__':
-    parser = ImageParser(vision_llm=qwen_vision, use_vision=True, use_ocr=True)
+    parser = ImageParser(vision_llm=qwen_vision)
     file_path = "C:\\Users\\ASUS\\Pictures\\美女.png"
     docs = parser.parse(file_path)
     for doc in docs:

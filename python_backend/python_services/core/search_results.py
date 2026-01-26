@@ -32,6 +32,15 @@ class KeywordSearchResult:
     matched_terms: list[str] = field(default_factory=list)  # 存储匹配到的词
     rank: int = 0
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "content": self.document.page_content,
+            "metadata": self.document.metadata,
+            "score": self.score,
+            "rank": self.rank,
+            "matched_terms": self.matched_terms
+        }
+
 
 @dataclass
 class HybridSearchResult:

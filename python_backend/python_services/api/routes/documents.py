@@ -1,8 +1,12 @@
 import datetime
+import os.path
 import uuid
 
 from fastapi import APIRouter, UploadFile, File, Form, Query, HTTPException
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Literal
+
+from fastapi.params import Path
+from langchain_core.documents import Document
 from pydantic import BaseModel
 
 from basic_core.llm_factory import qwen_vision
@@ -14,7 +18,7 @@ router = APIRouter()
 
 
 # 文档模型
-class Document(BaseModel):
+class MyDocument(BaseModel):
     id: str
     file_name: str
     file_type: str
@@ -44,7 +48,7 @@ documents = []
 
 
 # 获取文档列表
-@router.get("", response_model=List[Document])
+@router.get("", response_model=List[MyDocument])
 def get_documents(
         collection_id: Optional[int] = Query(None, description="知识库ID"),
         status: Optional[str] = Query(None, description="文档状态")
@@ -63,21 +67,40 @@ def get_documents(
     return filtered_docs
 
 
-def upload_doc(file: str):
+def upload_doc(file: str) -> list[Document]:
     pipeline = RAGPipeline(config=get_config(), vision_llm=qwen_vision)
-    fdocuments = pipeline.parse_file(file)
-    document = Document(
+    fdocuments = pipeline.parse_file(file)  # todo:后台处理
+    Mydocument = MyDocument(
         id=uuid.uuid4(),
         file_name=file.split('/')[-1].split('.')[0],
         file_type=file.split('.')[-1],
         created_at=datetime.datetime.now(),
         collection_id=None
     )
-    documents.append(document)
+    documents.append(Mydocument)
     return fdocuments
 
 
 # 上传文档
+@router.get("/page")
+def get_png(
+    type: Literal['original', 'argument'],
+    file_id: str = Query(..., description="文件id"),
+    page: int = Query(..., ),
+) -> Optional[bytes]:
+    """获取文档的png图片"""
+    file_name = f"{file_id}/{type}/{page}"
+    if not os.path.exists(file_name):
+        return None
+    with open(file_name, "rb") as f:
+        data = f.read()
+    os.path
+    return None
+
+
+
+
+
 @router.post("/upload", response_model=UploadDocumentResponse)
 async def upload_document(
         file: UploadFile = File(...),
@@ -88,11 +111,11 @@ async def upload_document(
     return UploadDocumentResponse(
         document_id=uuid.uuid4(),
         file_name=file.filename,
-        message=fdocuments,
+        message=fdocuments[0].page_content,
     )
-
-
 # 批量上传文档
+
+
 @router.post("/batch-upload")
 async def batch_upload_documents(
         files: List[UploadFile] = File(...),
@@ -109,10 +132,8 @@ async def batch_upload_documents(
         "message": f"成功上传 {len(files)} 个文件",
         "uploaded_files": [file.filename for file in files]
     }
-
-
 # 获取文档详情
-@router.get("/{doc_id}", response_model=Document)
+@router.get("/{doc_id}", response_model=MyDocument)
 def get_document(doc_id: str):
     """获取文档详情"""
     doc = next((d for d in documents if d.id == doc_id), None)

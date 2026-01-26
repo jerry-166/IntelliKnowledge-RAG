@@ -4,7 +4,6 @@ RAG检索的主流程
 import logging
 from pathlib import Path
 from typing import Optional, Literal, Any
-from uuid import uuid4
 
 from basic_core.llm_factory import qwen_vision
 from python_backend.python_services.core.settings import RAGConfig, get_config
@@ -13,15 +12,12 @@ from python_backend.python_services.parsers.markdown_parser import MultimodalMar
 from python_backend.python_services.parsers.pdf_parser import PDFParser
 from python_backend.python_services.parsers.ppt_parser import PPtParser
 from python_backend.python_services.parsers.text_parser import TextParser
-from python_backend.python_services.parsers.web_parser import WebParser
 from python_backend.python_services.parsers.word_parser import WordParser
 from python_backend.python_services.splitter.integration_splitter import IntegrationSplitter
 from python_backend.python_services.vector_store.multimodal_store import MultimodalVectorStore
-import python_backend.python_services.core.logger_config
 from python_services.retriever.hybrid_retriever import HybridRetriever
 
 logger = logging.getLogger(__name__)
-
 
 """
 1. suffix = file_path.suffix.lower().lstrip('.')
@@ -53,8 +49,7 @@ class RAGPipeline:
 
     def _init_parsers(self):
         """初始化不同的解析器"""
-        image_parser = ImageParser(vision_llm=self.vision_llm, use_ocr=self.config.parser.use_ocr,
-                                   use_vision=self.config.parser.use_vision, )
+        image_parser = ImageParser(vision_llm=self.vision_llm)
         text_parser = TextParser()
         self.parsers = {
             "pdf": PDFParser(
@@ -64,25 +59,13 @@ class RAGPipeline:
                 extract_tables=self.config.parser.extract_tables,
                 min_image_size=self.config.parser.min_image_size,
             ),
-            "md": MultimodalMarkdownParser(
-                vision_llm=self.vision_llm,
-                use_ocr=self.config.parser.use_ocr,
-                use_vision=self.config.parser.use_vision,
-            ),
+            "md": MultimodalMarkdownParser(vision_llm=self.vision_llm,),
             "png": image_parser,
             "jpg": image_parser,
             "jpeg": image_parser,
             "txt": text_parser,
             "docx": WordParser(),
-            "ppt": PPtParser(
-                vision_llm=self.vision_llm,
-                use_ocr=self.config.parser.use_ocr,
-                use_vision=self.config.parser.use_vision,
-            ),
-            "url": WebParser(
-                use_ocr=self.config.parser.use_ocr,
-                use_vision=self.config.parser.use_vision,
-            )
+            "ppt": PPtParser(vision_llm=self.vision_llm),
             # 添加别的解析器...
         }
 
@@ -113,9 +96,7 @@ class RAGPipeline:
 
     def _init_vector_store(self):
         """初始化向量存储"""
-        self.vector_store = MultimodalVectorStore(
-            rag_config=self.config,
-        )
+        self.vector_store = MultimodalVectorStore(rag_config=self.config,)
 
     def _init_hybrid_retriever(self):
         self.hybrid_retriever = HybridRetriever(
@@ -162,7 +143,7 @@ class RAGPipeline:
         else:
             doc_ids = self.hybrid_retriever.add_documents(split_documents)
 
-        return len(doc_ids)
+        return {"chunks": split_documents}
 
     def parse_file(self, file_path):
         path = Path(file_path)
@@ -184,8 +165,8 @@ class RAGPipeline:
         for ext in self.parsers.keys():
             for file in dir_path.glob(f"**/*.{ext}"):
                 try:
-                    count = self.ingest(str(file), show_progress=show_progress)
-                    total += count
+                    chunks = self.ingest(str(file), show_progress=show_progress)
+                    total += len(chunks)
                 except Exception as e:
                     logger.error(f"Failed to ingest {file}: {e}")
 
@@ -236,7 +217,7 @@ class RAGPipeline:
             search_results = self.hybrid_retriever.search(
                 query, top_k, filter_dict,
             )
-        return [r.to_dict() for r in search_results]
+        return search_results
 
     def as_retriever(self):
         """返回retriever"""
@@ -251,8 +232,9 @@ class RAGPipeline:
             use_reranker=True,
         )
         for i, result in enumerate(results, 1):
-            print(f"\n--- Result {i} (score: {result['score']:.4f}) ---")
-            print(f"Content: {result['content'][:200]}...")
+            result_dict = result.to_dict()
+            print(f"\n--- Result {i} (score: {result_dict['score']:.4f}) ---")
+            print(f"Content: {result_dict['content'][:200]}...")
         # 查看统计
         print("\n--- Stats ---")
         print(self.get_stats())
@@ -264,19 +246,19 @@ class RAGPipeline:
 
 if __name__ == '__main__':
     # 初始化管道
-    pipeline = RAGPipeline(config=get_config(), vision_llm=qwen_vision)
+    pipeline = RAGPipeline(config=get_config())  # , vision_llm=qwen_vision
 
     # 摄入文档
     # file_name = r"C:\Users\ASUS\Desktop\video.pdf"
     # pipeline.ingest(file_name, show_progress=True)
     # file_dir = r"C:\Users\ASUS\Desktop\pythonCode\LangChain\second_start\src\agent\static\pdf"
     # pipeline.ingest_directory(file_dir, show_progress=True)
-    # file_name = r"C:\Users\ASUS\Desktop\makedown\deepAgent.md"
-    # pipeline.ingest(file_name, show_progress=True)
+    file_name = r"C:\Users\ASUS\Desktop\makedown\deepAgent.md"
+    pipeline.ingest(file_name, show_progress=True)
 
     # 检索
-    pipeline.call("人机互动插图")
-    # call("什么事提示词工程？")
-    # call("西北工业大学最高是多少？")
-    # call("西北工业大学最高分是多少？")
-    # call("subagent由什么组成？")
+    # pipeline.call("人机互动插图")
+    # pipeline.call("什么事提示词工程？")
+    # pipeline.call("西北工业大学最高是多少？")
+    # pipeline.call("西北工业大学最高分是多少？")
+    pipeline.call("subagent由什么组成？")
