@@ -19,9 +19,9 @@ from basic_core.llm_factory import qwen_vision, init_embedding_basic
 from python_services.core.cache_manager import CacheManager
 from python_services.core.settings import get_config, RAGConfig
 from python_services.embeddings.clip_embedding import CLIPEmbeddings
-from python_backend.python_services.parsers.pdf_parser import PDFParser
+from python_services.parsers.pdf_parser import PDFParser
 from python_services.reranker.reranker_ import Reranker
-from python_backend.python_services.splitter.integration_splitter import IntegrationSplitter
+from python_services.splitter.integration_splitter import IntegrationSplitter
 from python_services.utils.index_util import IndexUtil
 from python_services.vector_store.base_store import BaseVectorStore, SearchResult
 

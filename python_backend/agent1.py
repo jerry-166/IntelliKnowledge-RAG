@@ -14,30 +14,26 @@ RAG检索/调用模型
 @dynamic_prompt
 通过中间件定义状态
 """
+import getpass
+import os
 import uuid
 from typing import Literal
-
 from langchain.agents import create_agent
 from langchain.agents.middleware import wrap_model_call, ModelRequest, ModelResponse, SummarizationMiddleware
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
-from langchain_ollama import ChatOllama
-from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.constants import START, END
 from langgraph.graph import MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition, ToolRuntime
 from langgraph.store.memory import InMemoryStore
-
 from basic_core.llm_factory import local_qwen, qwen_vision, claude
+from basic_core.prompts import GRADE_PROMPT, RESPONSE_SYSTEM_PROMPT, AGENT_SYSTEM_PROMPT
 from python_services.core.settings import get_config
 from python_services.rag_pipeline import RAGPipeline
-from basic_core.prompts import GRADE_PROMPT, RESPONSE_SYSTEM_PROMPT, AGENT_SYSTEM_PROMPT
-from python_backend.python_services.utils.search_kwargs_util import SearchKwargsUtil
-import getpass
-import os
+from python_services.utils.search_kwargs_util import SearchKwargsUtil
 
 if not os.environ.get("TAVILY_API_KEY"):
     os.environ["TAVILY_API_KEY"] = getpass.getpass("Tavily API key:\n")

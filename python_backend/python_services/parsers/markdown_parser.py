@@ -9,14 +9,10 @@ import os
 import re
 import uuid
 from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
-
-from langchain_community.document_loaders import UnstructuredMarkdownLoader
 from langchain_core.documents import Document
-from basic_core.llm_factory import qwen_vision
 from python_services.core.parser_element_type import ElementType
 from python_services.parsers.base_parser import BaseParser
 from python_services.utils.image_util import ImageUtil
