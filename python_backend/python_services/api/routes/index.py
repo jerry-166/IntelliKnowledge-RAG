@@ -1,17 +1,24 @@
 import os.path
-from typing import Optional, Literal
-
+from typing import Optional, Literal, List
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-
+from python_services.api.routes.common import SuccessResponse
 from python_services.core.search_results import HybridSearchResult, SearchResult
 from python_services.core.settings import get_config
-from python_services.rag_pipeline import RAGPipeline
 
 router = APIRouter()
 
-pipeline = RAGPipeline(config=get_config())
+# 延迟初始化pipeline，避免在模块导入时执行
+pipeline = None
+
+
+def get_pipeline():
+    """获取RAGPipeline实例，延迟初始化"""
+    global pipeline
+    if pipeline is None:
+        from python_services.rag_pipeline import RAGPipeline
+        pipeline = RAGPipeline(config=get_config())
+    return pipeline
 
 
 class Query(BaseModel):
@@ -29,32 +36,45 @@ class Response(BaseModel):
     metadata: Optional[dict] = None
 
 
-@router.post("/build")
-def build_index(file_path):
+class SearchResponse(BaseModel):
+    results: List[Response]
+    total: int
+
+
+@router.post("/build", response_model=SuccessResponse)
+def build_index(file_path: str):
     """构建索引（切分+向量化+存盘）"""
+    # 这里的file_path是加强文档，需前端注意
     if not os.path.exists(file_path):
         return {
             "success": False,
             "message": f"不存在文件：{file_path}"
         }
 
-    chunks = pipeline.ingest(file_path, True)
-    print(f"添加{len(chunks)}个片段")
-    return JSONResponse(content=chunks)
+    data = get_pipeline().split_and_store(file_path=file_path, show_progress=True)
+    chunks = data.get('chunks', [])
+    doc_ids = data.get('doc_ids', [])
+
+    print(f"添加{len(chunks)}个片段成功")
+    return SuccessResponse(
+        message=f"构建索引成功",
+        data=data,
+    )
 
 
-@router.post("/search", response_model=Response)
+@router.post("/search", response_model=SearchResponse)
 def search_topk(query: Query):
     """搜索topk个结果，并返回list[Response]"""
-    results = pipeline.search(
+    results = get_pipeline().search(
         query=query.content,
         top_k=query.top_k,
-        filter_dict={"user_id": query.metadata.get("user_id")},
+        filter_dict={"user_id": query.metadata.get("user_id", None)},
         search_type=query.search_type,
         use_cache=query.use_cache,
     )
+    response_items = []
     if isinstance(results[0], HybridSearchResult):
-        response = [
+        response_items = [
             Response(
                 text=res.document.content,
                 score=res.score,
@@ -70,7 +90,7 @@ def search_topk(query: Query):
             for res in results
         ]
     elif isinstance(results[0], SearchResult):
-        response = [
+        response_items = [
             Response(
                 text=res.document.content,
                 score=res.score,
@@ -83,4 +103,4 @@ def search_topk(query: Query):
     else:
         raise HTTPException(status_code=500, detail="响应格式错误")
 
-    return response
+    return SearchResponse(results=response_items, total=len(response_items))

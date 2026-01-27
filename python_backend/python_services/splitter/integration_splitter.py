@@ -2,6 +2,7 @@
 整合的splitter
 """
 import os
+from pathlib import Path
 
 from python_services.core.settings import get_config
 
@@ -78,6 +79,28 @@ class IntegrationSplitter:
             docs.extend(splitter_text_documents)
 
         docs.extend(image_docs)
+
+        return docs
+
+    def split_file(self, file_path: str) -> List[Document]:
+        """切分传入的文件"""
+        if not Path(file_path).exists():
+            return []
+        file_suffix = file_path.split('.')[-1].lower()
+        # 读取后，进行切割
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = f.read()
+
+        docs = []
+        if file_suffix == 'md':
+            splitter_md_documents = self.markdown_splitter.split_text(data)
+            docs.extend(splitter_md_documents)
+        elif file_suffix == 'txt':
+            splitter_text_documents = self.text_splitter.split_text(data)
+            docs.extend(splitter_text_documents)
+        elif file_suffix in ['docx']:
+            splitter_text_documents = self.semantic_splitter.split_text(data)
+            docs.extend(splitter_text_documents)
 
         return docs
 

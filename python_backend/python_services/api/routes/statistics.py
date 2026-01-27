@@ -48,7 +48,7 @@ def get_overview_stats():
 
 # 获取知识库统计
 @router.get("/collections/{collection_id}", response_model=CollectionStatsResponse)
-def get_collection_stats(collection_id: int):
+def get_collection_stats(collection_id: str):
     """获取知识库统计"""
     return CollectionStatsResponse(
         collection_id=collection_id,

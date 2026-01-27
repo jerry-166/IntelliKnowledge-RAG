@@ -4,18 +4,17 @@ RAG检索的主流程
 import logging
 from pathlib import Path
 from typing import Optional, Literal, Any
-
-from basic_core.llm_factory import qwen_vision
-from python_backend.python_services.core.settings import RAGConfig, get_config
-from python_backend.python_services.parsers.image_parser import ImageParser
-from python_backend.python_services.parsers.markdown_parser import MultimodalMarkdownParser
-from python_backend.python_services.parsers.pdf_parser import PDFParser
-from python_backend.python_services.parsers.ppt_parser import PPtParser
-from python_backend.python_services.parsers.text_parser import TextParser
-from python_backend.python_services.parsers.word_parser import WordParser
-from python_backend.python_services.splitter.integration_splitter import IntegrationSplitter
-from python_backend.python_services.vector_store.multimodal_store import MultimodalVectorStore
+from langchain_core.documents import Document
+from python_services.core.settings import RAGConfig, get_config
+from python_services.parsers.image_parser import ImageParser
+from python_services.parsers.markdown_parser import MultimodalMarkdownParser
+from python_services.parsers.pdf_parser import PDFParser
+from python_services.parsers.ppt_parser import PPtParser
+from python_services.parsers.text_parser import TextParser
+from python_services.parsers.word_parser import WordParser
 from python_services.retriever.hybrid_retriever import HybridRetriever
+from python_services.splitter.integration_splitter import IntegrationSplitter
+from python_services.vector_store.multimodal_store import MultimodalVectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -129,9 +128,25 @@ class RAGPipeline:
         logger.info(f"Parsing file: {file_path}")
         documents = parser.parse(file_path)
 
+        data = self.split_and_store(documents, suffix)
+
+        return {
+            'chunks': data.get('chunks',[])
+        }
+
+    def split_and_store(
+            self,
+            documents: Optional[list[Document]] = None,
+            suffix: Optional[str] = None,
+            file_path: Optional[str] = None,
+            show_progress: Optional[bool] = False
+    ):
         # 切分文档
-        logger.info(f"Splitting {len(documents)} documents")
-        split_documents = self.splitter.split_documents_(documents, file_suffix=suffix)
+        split_documents = []
+        if documents:
+            split_documents = self.splitter.split_documents_(documents, suffix)
+        if file_path:
+            split_documents = self.splitter.split_file(file_path)
         # 存储向量
         logger.info(f"Storing {len(split_documents)} chunks")
         if not self.retriever_config.hybrid_enabled:
@@ -143,7 +158,10 @@ class RAGPipeline:
         else:
             doc_ids = self.hybrid_retriever.add_documents(split_documents)
 
-        return {"chunks": split_documents}
+        return {
+            "chunks": split_documents,
+            "doc_ids": doc_ids,
+        }
 
     def parse_file(self, file_path):
         path = Path(file_path)

@@ -1,16 +1,32 @@
 import datetime
+import json
 import uuid
-
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, HTTPException, Path, Query, Response
 from typing import List, Optional
-
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel
 
-from agent1 import rag_workflow
-
 # 创建路由实例
 router = APIRouter()
+
+# 延迟初始化
+user_id = None
+rag_workflow = None
+
+
+def get_user_id():
+    global user_id
+    if user_id is None:
+        from python_services.core.context_login import get_user
+        user_id = get_user()
+    return user_id
+
+
+def get_rag_workflow():
+    global rag_workflow
+    if rag_workflow is None:
+        from agent1 import rag_workflow
+    return rag_workflow
 
 
 # 消息模型
@@ -24,7 +40,7 @@ class Message(BaseModel):
 
 
 # 对话模型
-class Conversation(BaseModel):
+class Conversation(BaseModel):  # 会话标识用户的话，关联的消息就不用标识了
     id: str
     title: str  # 标题
     created_at: str
@@ -57,14 +73,14 @@ mock_conversations = [
         title="测试对话1",
         created_at="2024-01-01T10:00:00",
         updated_at="2024-01-01T10:30:00",
-        metadata={}
+        metadata={'user_id': "1"}
     ),
     Conversation(
         id="conv_2",
         title="测试对话2",
         created_at="2024-01-02T15:00:00",
         updated_at="2024-01-02T15:15:00",
-        metadata={}
+        metadata={'user_id': "2"}
     )
 ]
 
@@ -93,7 +109,13 @@ mock_messages = [
 @router.get("/conversations", response_model=List[Conversation])
 def get_conversations():
     """获取对话列表"""
-    return mock_conversations
+    # 从mock_conversations中获取，注意metadata中user_id的比较
+    user_id = get_user_id()
+    if user_id:
+        conversations = [conv for conv in mock_conversations if conv.metadata.get("user_id", None) == user_id]
+    else:
+        conversations = mock_conversations
+    return conversations
 
 
 # 获取对话历史
@@ -104,7 +126,10 @@ def get_conversation_history(
         page_size: int = 20
 ):
     """获取对话历史"""
-    conversation = next((conv for conv in mock_conversations if conv.id == conv_id), None)
+    user_id = get_user_id()
+    conversation = next(
+        (conv for conv in mock_conversations if conv.id == conv_id and conv.metadata.get('user_id', None) == user_id),
+        None)
     if not conversation:
         raise HTTPException(status_code=404, detail="对话不存在")
 
@@ -127,16 +152,26 @@ def get_conversation_history(
     }
 
 
+# 创建对话请求模型
+class CreateConversationRequest(BaseModel):
+    title: Optional[str] = "新对话"
+    metadata: Optional[dict] = None
+
+
 # 创建新对话
 @router.post("/conversations", response_model=Conversation)
-def create_conversation(data: dict):
+def create_conversation(data: CreateConversationRequest):
     """创建新对话"""
+    user_id = get_user_id()
     new_conv = Conversation(
         id=f"conv_{len(mock_conversations) + 1}",
-        title=data.get("title", "新对话"),
-        created_at=datetime.datetime.now(),
-        updated_at=datetime.datetime.now(),
-        metadata=data.get("metadata", {})
+        title=data.title,
+        created_at=datetime.datetime.now().isoformat(),
+        updated_at=datetime.datetime.now().isoformat(),
+        metadata={
+            'user_id': user_id,
+            **data.metadata
+        }
     )
 
     mock_conversations.append(new_conv)
@@ -167,7 +202,7 @@ def delete_conversation(conv_id: str):
 @router.post("/clear")
 def clear_conversation(conv_id: str):
     """清空会话"""
-    delete_message(conv_id)
+    delete_message(conv_id)  # 删除指定id的全部messages
     return {
         "success": True,
         "message": "会话清空成功"
@@ -178,33 +213,23 @@ def clear_conversation(conv_id: str):
 @router.post("/invoke", response_model=ChatResponse)
 def chat(request: ChatRequest):
     """非流式聊天"""
-    # 生成对话ID
+    # 对话ID
     conversation_id = request.conversation_id or f"conv_{len(mock_conversations) + 1}"
+    # 获取历史信息+query
+    input = save_message_get_input(conversation_id, request)
 
-    # 构建历史信息
-    input = [message for message in mock_messages if message.conversation_id == conversation_id]
-
-    message = Message(
-        id=str(uuid.uuid4()),
-        conversation_id=conversation_id,
-        content=request.message,
-        role="user",
-        created_at=datetime.datetime.now()
-    )
-    mock_messages.append(message)
-
-    input.append(message)
-
+    # 调用工作流
     config = RunnableConfig(configurable={
         "user_id": uuid.uuid4(),
-        "thread_id": str(uuid.uuid4())+conversation_id,
+        "thread_id": str(uuid.uuid4()) + conversation_id,
         "search_type": "hybrid",
     })
-    # 调用Agent进行回答
-    response = rag_workflow.invoke(
+    response = get_rag_workflow().invoke(
         input=input,
         config=config,
     )
+
+    # 封装结果
     message = Message(
         id=str(uuid.uuid4()),
         conversation_id=conversation_id,
@@ -225,15 +250,49 @@ def chat(request: ChatRequest):
     )
 
 
-# todo:流式聊天
+def save_message_get_input(conversation_id, request):
+    # 构建历史信息
+    input = [message for message in mock_messages if message.conversation_id == conversation_id]
+    message = Message(
+        id=str(uuid.uuid4()),
+        conversation_id=conversation_id,
+        content=request.message,
+        role="user",
+        created_at=datetime.datetime.now().isoformat()
+    )
+    mock_messages.append(message)
+    input.append(message)
+    return input
+
+
+# SSE 响应
 @router.post("/stream")
-def stream_chat(request: ChatRequest):
+async def stream_chat(request: ChatRequest):
     """流式聊天"""
-    # 在实际实现中，这里会返回Server-Sent Events
-    return {
-        "message_id": f"msg_{len(mock_messages) + 1}",
-        "conversation_id": request.conversation_id or f"conv_{len(mock_conversations) + 1}",
-        "content": f"这是流式响应：{request.message}",
-        "role": "assistant",
-        "created_at": "2024-01-01T10:00:00"
-    }
+    # 会话id
+    conversation_id = request.conversation_id or f"conv_{len(mock_conversations) + 1}"
+
+    async def event_generator(conversation_id):
+        # 获取input
+        input = save_message_get_input(conversation_id, request)
+        config = RunnableConfig(configurable={
+            "user_id": uuid.uuid4(),
+            "thread_id": str(uuid.uuid4()) + conversation_id,
+            "search_type": "hybrid",
+        })
+
+        async for chunk in get_rag_workflow().astream(
+                input=input,
+                config=config,
+        ):
+            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+    return Response(
+        content=event_generator(conversation_id),
+        media_type="text/event-stream",  # 声明为SSE格式
+        headers={
+            "Cache-Control": "no-cache",  # 禁止缓存
+            "Connection": "keep-alive",  # 保持长连接
+            "Access-Control-Allow-Origin": "*",  # 允许跨域，生产环境需要指定
+        }
+    )
