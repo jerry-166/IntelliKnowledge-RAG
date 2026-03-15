@@ -117,14 +117,14 @@ class PDFParser(BaseParser):
         if not pdf_path.exists():
             raise FileNotFoundError(f"文件不存在：{pdf_path}")
 
-        docs = fitz.open(pdf_path)  # Document()
-        total_pages = len(docs)
+        pages = fitz.open(pdf_path)  # Document()
+        total_pages = len(pages)
 
         # 结构列表
         page_elements_map: Dict[int, List[PDFElement]] = {}
 
         for page_num in range(total_pages):
-            page = docs[page_num]
+            page = pages[page_num]
             page_elements: List[PDFElement] = []
 
             if is_scanned:
@@ -157,7 +157,7 @@ class PDFParser(BaseParser):
 
                 # 4. 提取图片
                 if self.extract_images:
-                    image_elements = self._extract_images(page, page_num, docs)
+                    image_elements = self._extract_images(page, page_num, pages)
                     if image_elements:
                         print(f"提取PDF图片成功")
                         page_elements.extend(image_elements)
@@ -179,7 +179,7 @@ class PDFParser(BaseParser):
 
             page_elements_map[page_num] = page_elements
 
-        docs.close()
+        pages.close()
 
         # 6. 转换为langchain的Document列表并返回
         return self._elements_to_documents(

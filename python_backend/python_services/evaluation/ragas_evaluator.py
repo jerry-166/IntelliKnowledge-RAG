@@ -36,7 +36,7 @@ def create_evaluation_dataset(queries_and_ground_truths):
         )
 
         data['question'].append(question)
-        data['answer'].append(answer.content)
+        data['answer'].append(answer["messages"][0]["content"])
         data['contexts'].append([c.page_content for c in contexts])
         data['ground_truth'].append(ground_truth)
 
